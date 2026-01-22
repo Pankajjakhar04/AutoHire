@@ -27,12 +27,13 @@ app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 app.use(cookieParser());
 app.use(morgan('dev'));
-app.use('/api', apiRoutes);
 
 // Health check route
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'backend' });
 });
+
+app.use('/api', apiRoutes);
 
 async function start() {
   try {
