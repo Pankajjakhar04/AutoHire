@@ -108,14 +108,7 @@ export default function Register() {
           <>
             <label>
               Highest qualification degree
-              <select value={highestQualificationDegree} onChange={(e) => setHighestQualificationDegree(e.target.value)} required>
-                <option value="">Select qualification</option>
-                <option value="High School">High School</option>
-                <option value="Diploma">Diploma</option>
-                <option value="Bachelor's">Bachelor's</option>
-                <option value="Master's">Master's</option>
-                <option value="PhD">PhD</option>
-              </select>
+              <input value={highestQualificationDegree} onChange={(e) => setHighestQualificationDegree(e.target.value)} placeholder="e.g. B.Tech, M.Sc" />
             </label>
             <label>
               Specialization

@@ -523,7 +523,7 @@ textarea { resize: vertical; }
 .screening-panel { display: flex; flex-direction: column; gap: 0.9rem; }
 .screening-toolbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.65rem; align-items: center; }
 .toolbar-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.screening-table .table-header, .screening-table .table-row { grid-template-columns: 0.25fr 0.5fr 0.9fr 1.1fr 1.1fr 0.7fr 0.9fr 1.1fr 1.3fr 1.2fr; }
+.screening-table .table-header, .screening-table .table-row { grid-template-columns: 0.25fr 0.5fr 0.9fr 1.1fr 1.1fr 0.7fr 0.7fr 1fr 1.1fr 0.7fr 1.2fr; }
 
 @media (max-width: 960px) {
   .process-layout { grid-template-columns: 1fr; }

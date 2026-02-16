@@ -63,31 +63,29 @@ export async function register(req, res) {
 
     const passwordHash = await bcrypt.hash(password, 10);
     
-    // Build user object with role-specific fields
-    const userData = {
+    // Generate candidate ID for candidates only
+    let candidateId = null;
+    
+    if (role === 'candidate') {
+      // Generate a unique candidate ID (e.g., CAND-timestamp-random)
+      const timestamp = Date.now().toString(36).toUpperCase();
+      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+      candidateId = `CAND-${timestamp}-${random}`;
+    }
+    
+    const user = await User.create({
       email: email.toLowerCase().trim(),
       password: passwordHash,
       name,
-      role
-    };
-
-    // Add role-specific fields only
-    if (role === 'candidate') {
-      // Generate a unique candidate ID for candidates only
-      const timestamp = Date.now().toString(36).toUpperCase();
-      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-      userData.candidateId = `CAND-${timestamp}-${random}`;
-      userData.highestQualificationDegree = highestQualificationDegree;
-      userData.specialization = specialization;
-      userData.cgpaOrPercentage = cgpaOrPercentage;
-      userData.passoutYear = passoutYear;
-    } else {
-      // For recruiters/HR managers, only store employee info
-      userData.employeeId = employeeId;
-      userData.companyName = companyName;
-    }
-
-    const user = await User.create(userData);
+      role,
+      candidateId,
+      employeeId: role !== 'candidate' ? employeeId : undefined,
+      companyName: role !== 'candidate' ? companyName : undefined,
+      highestQualificationDegree,
+      specialization,
+      cgpaOrPercentage,
+      passoutYear
+    });
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user);

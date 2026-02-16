@@ -21,7 +21,7 @@ export type AuthContextValue = {
   accessToken: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: { email: string; password: string; name?: string; role?: string; employeeId?: string; companyName?: string; highestQualificationDegree?: string; specialization?: string; cgpaOrPercentage?: string; passoutYear?: number }) => Promise<void>;
+  register: (payload: { email: string; password: string; name?: string; role?: string; employeeId?: string; companyName?: string; highestQualificationDegree?: string; specialization?: string; cgpaOrPercentage?: string; passoutYear?: number; [key: string]: any }) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('accessToken', data.accessToken);
   };
 
-  const register = async (payload: { email: string; password: string; name?: string; role?: string; highestQualificationDegree?: string; specialization?: string; cgpaOrPercentage?: string; passoutYear?: number }) => {
+  const register = async (payload: { email: string; password: string; name?: string; role?: string; employeeId?: string; companyName?: string; highestQualificationDegree?: string; specialization?: string; cgpaOrPercentage?: string; passoutYear?: number; [key: string]: any }) => {
     const { data } = await api.post('/auth/register', payload);
     setUser(data.user);
     setAccessToken(data.accessToken);

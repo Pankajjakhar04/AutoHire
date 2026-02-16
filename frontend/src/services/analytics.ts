@@ -4,6 +4,8 @@ export type DashboardMetrics = {
   openRoles: number;
   activeCandidates: number;
   applications: number;
+  screenedIn: number;
+  screenedOut: number;
   interviewsScheduled: number;
   offersInProgress: number;
 };

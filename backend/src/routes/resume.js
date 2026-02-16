@@ -9,7 +9,12 @@ import {
   listMyResumes,
   listMyResumesByJob,
   listResumesByJob,
-  uploadResume
+  uploadResume,
+  screenResumes,
+  aiScreenResumes,
+  advanceCandidates,
+  listResumesByStage,
+  exportStageToExcel
 } from '../controllers/resumeController.js';
 
 const router = Router();
@@ -52,6 +57,50 @@ router.get(
 );
 
 router.get('/mine', authenticate, listMyResumes);
+
+// Bulk screen in/out resumes (HR/Recruiter only)
+router.patch(
+  '/screen',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  screenResumes
+);
+
+// AI-based screening (HR/Recruiter only)
+router.post(
+  '/ai-screen',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  aiScreenResumes
+);
+
+// Advance candidates to next pipeline stage (HR/Recruiter only)
+router.post(
+  '/advance',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  advanceCandidates
+);
+
+// List resumes by job and pipeline stage
+router.get(
+  '/job/:jobId/stage/:stage',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('jobId').isMongoId(),
+  handleValidation,
+  listResumesByStage
+);
+
+// Export stage candidates to Excel
+router.get(
+  '/job/:jobId/stage/:stage/export',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('jobId').isMongoId(),
+  handleValidation,
+  exportStageToExcel
+);
 
 router.get('/:id', authenticate, param('id').isMongoId(), handleValidation, getResume);
 router.get('/:id/download', authenticate, param('id').isMongoId(), handleValidation, downloadResume);

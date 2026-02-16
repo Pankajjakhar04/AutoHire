@@ -4,11 +4,12 @@ import Resume from '../models/Resume.js';
 // Dashboard analytics: real-time counts derived from current collections
 export async function getDashboardMetrics(_req, res) {
   try {
-    const [openRoles, activeCandidatesRaw, applications, interviewsScheduled, offersInProgress] = await Promise.all([
+    const [openRoles, activeCandidatesRaw, applications, screenedIn, screenedOut, interviewsScheduled, offersInProgress] = await Promise.all([
       JobOpening.countDocuments({ isDeleted: false, status: 'active' }),
       Resume.distinct('candidateId', { isDeleted: false }),
       Resume.countDocuments({ isDeleted: false }),
-      // Using resume status to approximate pipeline stages; adjust when interview/offer models exist
+      Resume.countDocuments({ isDeleted: false, status: 'screened-in' }),
+      Resume.countDocuments({ isDeleted: false, status: 'screened-out' }),
       Resume.countDocuments({ isDeleted: false, status: 'processing' }),
       Resume.countDocuments({ isDeleted: false, status: 'scored' })
     ]);
@@ -19,6 +20,8 @@ export async function getDashboardMetrics(_req, res) {
       openRoles,
       activeCandidates,
       applications,
+      screenedIn,
+      screenedOut,
       interviewsScheduled,
       offersInProgress
     });

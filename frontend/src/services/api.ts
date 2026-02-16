@@ -1,8 +1,7 @@
 import axios from 'axios';
 
-const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 const api = axios.create({
-  baseURL: baseUrl.replace(/\/$/, '') + '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api',
   withCredentials: true
 });
 
@@ -20,9 +19,14 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = originalRequest?.url || '';
 
-    // If we get a 401 and haven't already tried to refresh, attempt to refresh the token
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Never attempt token refresh for auth endpoints — let their errors pass through directly
+    const authPaths = ['/auth/login', '/auth/register', '/auth/refresh-token', '/auth/logout'];
+    const isAuthRequest = authPaths.some((p) => requestUrl.includes(p));
+
+    // If we get a 401, it's not an auth endpoint, and we haven't already retried, attempt refresh
+    if (error.response?.status === 401 && !isAuthRequest && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
@@ -44,10 +48,10 @@ api.interceptors.response.use(
         // Retry the original request
         return api(originalRequest);
       } catch (refreshError) {
-        // If refresh fails, clear the session and reject
+        // If refresh fails, clear the session and reject with the ORIGINAL error
         localStorage.removeItem('user');
         localStorage.removeItem('accessToken');
-        return Promise.reject(refreshError);
+        return Promise.reject(error);
       }
     }
 

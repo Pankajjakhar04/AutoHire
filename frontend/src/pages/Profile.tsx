@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { updateProfile, deleteAccount } from '../services/auth.ts';
+import { updateProfile, deleteAccount } from '../services/auth';
 
 export default function Profile() {
   const { user, logout } = useAuth();
