@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
-import { createJob, deleteJob, getJob, listJobs, updateJob } from '../controllers/jobController.js';
+import { checkEligibility, createJob, deleteJob, getJob, listJobs, updateJob } from '../controllers/jobController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -10,6 +10,8 @@ const handleValidation = (req, res, next) => {
   if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
   return next();
 };
+
+const eduLevels = ['highSchool', 'diploma', 'bachelors', 'masters', 'phd'];
 
 router.get(
   '/',
@@ -31,6 +33,19 @@ router.post(
     body('requiredSkills').optional().isArray(),
     body('niceToHaveSkills').optional().isArray(),
     body('experienceYears').optional().isNumeric(),
+    body('eligibilityCriteria').optional().isObject(),
+    body('eligibilityCriteria.educationMinLevel').optional().custom((value) => {
+      if (value === null || value === undefined) return true;
+      if (Array.isArray(value)) {
+        return value.length === 0 || value.every((v) => eduLevels.includes(v));
+      }
+      return eduLevels.includes(value);
+    }),
+    body('eligibilityCriteria.specialization').optional().isString(),
+    body('eligibilityCriteria.academicQualification').optional().isString(),
+    body('eligibilityCriteria.minExperienceYears').optional().isNumeric(),
+    body('eligibilityCriteria.customCriteria').optional().isArray(),
+    body('eligibilityCriteria.customCriteria.*').optional().isString(),
     body('salaryRange').optional().isObject(),
     body('salaryRange.min').optional().isNumeric(),
     body('salaryRange.max').optional().isNumeric(),
@@ -52,6 +67,19 @@ router.put(
     body('requiredSkills').optional().isArray(),
     body('niceToHaveSkills').optional().isArray(),
     body('experienceYears').optional().isNumeric(),
+    body('eligibilityCriteria').optional().isObject(),
+    body('eligibilityCriteria.educationMinLevel').optional().custom((value) => {
+      if (value === null || value === undefined) return true;
+      if (Array.isArray(value)) {
+        return value.length === 0 || value.every((v) => eduLevels.includes(v));
+      }
+      return eduLevels.includes(value);
+    }),
+    body('eligibilityCriteria.specialization').optional().isString(),
+    body('eligibilityCriteria.academicQualification').optional().isString(),
+    body('eligibilityCriteria.minExperienceYears').optional().isNumeric(),
+    body('eligibilityCriteria.customCriteria').optional().isArray(),
+    body('eligibilityCriteria.customCriteria.*').optional().isString(),
     body('salaryRange').optional().isObject(),
     body('salaryRange.min').optional().isNumeric(),
     body('salaryRange.max').optional().isNumeric(),
@@ -60,6 +88,23 @@ router.put(
   ],
   handleValidation,
   updateJob
+);
+
+router.post(
+  '/:id/check-eligibility',
+  [
+    authenticate,
+    requireRole(['candidate']),
+    param('id').isMongoId(),
+    body('educationLevel').optional().isIn(eduLevels),
+    body('specialization').optional().isString(),
+    body('academicQualification').optional().isString(),
+    body('experienceYears').optional().isNumeric(),
+    body('customCriteriaAccepted').optional().isArray(),
+    body('customCriteriaAccepted.*').optional().isInt({ min: 0 })
+  ],
+  handleValidation,
+  checkEligibility
 );
 
 router.delete(

@@ -12,6 +12,8 @@ import {
   uploadResume,
   screenResumes,
   aiScreenResumes,
+  startAiScreenRun,
+  getAiScreenRunProgress,
   advanceCandidates,
   listResumesByStage,
   exportStageToExcel
@@ -72,6 +74,23 @@ router.post(
   authenticate,
   requireRole(['recruiterAdmin', 'hrManager']),
   aiScreenResumes
+);
+
+// AI-based screening with progress (HR/Recruiter only)
+router.post(
+  '/ai-screen/start',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  startAiScreenRun
+);
+
+router.get(
+  '/ai-screen/progress/:runId',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('runId').isString(),
+  handleValidation,
+  getAiScreenRunProgress
 );
 
 // Advance candidates to next pipeline stage (HR/Recruiter only)

@@ -89,3 +89,44 @@ export async function sendBatchStageEmails(candidates, jobTitle, stage) {
   }
   return results;
 }
+
+/**
+ * Send application confirmation email to a candidate.
+ * Falls back to console.log if SMTP is not configured.
+ */
+export async function sendApplicationConfirmation({ to, candidateName, jobTitle, jobId }) {
+  const subject = `AutoHire – Application Received for ${jobTitle}`;
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #E5E7EB; border-radius: 8px;">
+      <h2 style="color: #0A66C2; margin-bottom: 4px;">AutoHire Recruitment</h2>
+      <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 12px 0;" />
+      <p>Dear <strong>${candidateName || 'Candidate'}</strong>,</p>
+      <p>Thank you for your interest! We have successfully received your application for the following position:</p>
+      <p style="font-size: 1.1rem; font-weight: 600; color: #1F2937; padding: 8px 12px; background: #F3F4F6; border-radius: 6px;">${jobTitle}</p>
+      <p>Your application is now under review. Our recruitment team will carefully evaluate your qualifications and experience. We will contact you via email if your profile matches our requirements.</p>
+      <p>Please note that due to the high volume of applications, it may take some time for us to review your submission. We appreciate your patience.</p>
+      <p style="margin-top: 20px;">Best regards,<br/><strong>AutoHire Recruitment Team</strong></p>
+    </div>
+  `;
+
+  const t = getTransporter();
+  if (!t) {
+    console.log(`[Email][LOG] To: ${to} | Subject: ${subject}`);
+    console.log(`[Email][LOG] Application confirmation for ${candidateName} - "${jobTitle}"`);
+    return { logged: true };
+  }
+
+  try {
+    const info = await t.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject,
+      html
+    });
+    console.log(`[Email] Application confirmation sent to ${to}: ${info.messageId}`);
+    return { sent: true, messageId: info.messageId };
+  } catch (err) {
+    console.error(`[Email] Failed to send application confirmation to ${to}:`, err.message);
+    return { error: err.message };
+  }
+}

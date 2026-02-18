@@ -1,13 +1,15 @@
 import api from './api';
 import { Job } from './jobs';
 
+export type JobLite = Pick<Job, '_id' | 'jobCode' | 'title' | 'status' | 'location'>;
+
 export type Resume = {
   _id: string;
   candidateId: string;
-  jobId: string;
-  job?: Pick<Job, '_id' | 'title' | 'status' | 'location'>;
+  jobId: string | JobLite;
+  job?: JobLite;
   // Some API responses may return the populated job under jobId when using mongoose populate
-  populatedJobId?: Pick<Job, '_id' | 'title' | 'status' | 'location'>;
+  populatedJobId?: JobLite;
   fileName: string;
   originalName?: string;
   filePath: string;
@@ -80,14 +82,41 @@ export type AIScreenResult = {
     candidateId: string;
     candidateName: string;
     score: number;
+    fitLevel?: string;
     status: string;
     matchedSkills: string[];
     missingSkills: string[];
+    redFlags?: string[];
+    strongSignals?: string[];
+    concerns?: string[];
   }[];
 };
 
 export async function aiScreenResumes(jobId: string, resumeIds?: string[], threshold?: number) {
   const { data } = await api.post<AIScreenResult>('/resumes/ai-screen', { jobId, resumeIds, threshold });
+  return data;
+}
+
+export type AIScreenRunStart = { runId: string; total: number };
+export type AIScreenRunProgress = {
+  runId: string;
+  jobId: string;
+  total: number;
+  processed: number;
+  screenedIn: number;
+  screenedOut: number;
+  percent: number;
+  done: boolean;
+  error?: string | null;
+};
+
+export async function startAiScreenResumes(jobId: string, resumeIds?: string[], threshold?: number) {
+  const { data } = await api.post<AIScreenRunStart>('/resumes/ai-screen/start', { jobId, resumeIds, threshold });
+  return data;
+}
+
+export async function getAiScreenProgress(runId: string) {
+  const { data } = await api.get<AIScreenRunProgress>(`/resumes/ai-screen/progress/${runId}`);
   return data;
 }
 

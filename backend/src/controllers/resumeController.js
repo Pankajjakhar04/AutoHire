@@ -5,7 +5,10 @@ import ExcelJS from 'exceljs';
 import Resume from '../models/Resume.js';
 import JobOpening from '../models/JobOpening.js';
 import User from '../models/User.js';
-import { sendBatchStageEmails } from '../services/email.js';
+import { sendApplicationConfirmation, sendBatchStageEmails } from '../services/email.js';
+import { scoreResumeWithGemini } from '../services/aiScreening.js';
+import { extractResumeTextFromBuffer, readFileToBuffer } from '../services/resumeText.js';
+import { createRun, getRun, updateRun } from '../services/aiScreenRunStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,6 +95,41 @@ export async function uploadResume(req, res) {
     }
 
     const resume = await Resume.create(resumeData);
+
+    // Best-effort resume text extraction (for Gemini screening)
+    (async () => {
+      try {
+        const extractedText = await extractResumeTextFromBuffer({
+          buffer: req.file.buffer,
+          mimeType: req.file.mimetype,
+          originalName: req.file.originalname
+        });
+        if (extractedText) {
+          await Resume.findByIdAndUpdate(resume._id, { $set: { extractedText } });
+        }
+      } catch (e) {
+        console.warn('[ResumeText] Extraction failed:', e?.message || e);
+      }
+    })();
+    
+    // Send application confirmation email (non-blocking)
+    (async () => {
+      try {
+        const candidate = await User.findById(req.user.id);
+        if (candidate && candidate.email) {
+          await sendApplicationConfirmation({
+            to: candidate.email,
+            candidateName: candidate.name || 'Candidate',
+            jobTitle: job.title,
+            jobId: job._id.toString()
+          });
+        }
+      } catch (emailErr) {
+        // Log but don't fail the request if email fails
+        console.error('[Email] Failed to send application confirmation:', emailErr?.message || emailErr);
+      }
+    })();
+    
     return res.status(201).json(resume);
   } catch (err) {
     console.error('Upload resume error', err?.message || err);
@@ -133,7 +171,9 @@ export async function listResumesByJob(req, res) {
 export async function listMyResumesByJob(req, res) {
   try {
     const { jobId } = req.params;
-    const resumes = await Resume.find({ jobId, candidateId: req.user.id, isDeleted: false }).sort({ createdAt: -1 });
+    const resumes = await Resume.find({ jobId, candidateId: req.user.id, isDeleted: false })
+      .sort({ createdAt: -1 })
+      .populate('jobId', 'jobCode title status location');
     return res.json(resumes);
   } catch (err) {
     console.error('List my resumes error', err);
@@ -145,7 +185,7 @@ export async function listMyResumes(req, res) {
   try {
     const resumes = await Resume.find({ candidateId: req.user.id, isDeleted: false })
       .sort({ createdAt: -1 })
-      .populate('jobId', 'title status location');
+      .populate('jobId', 'jobCode title status location');
     return res.json(resumes);
   } catch (err) {
     console.error('List my resumes error', err);
@@ -262,11 +302,14 @@ export async function screenResumes(req, res) {
   }
 }
 
-// AI-based screening: score candidates against job requirements
+// AI-based screening: score candidates against job requirements (Gemini-powered)
 export async function aiScreenResumes(req, res) {
   try {
     const { jobId, resumeIds, threshold = 50 } = req.body;
     if (!jobId) return res.status(400).json({ message: 'jobId is required' });
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(400).json({ message: 'GEMINI_API_KEY is not configured on the server.' });
+    }
 
     const job = await JobOpening.findById(jobId);
     if (!job || job.isDeleted) return res.status(404).json({ message: 'Job not found' });
@@ -286,50 +329,15 @@ export async function aiScreenResumes(req, res) {
     const candidateMap = {};
     candidates.forEach(c => { candidateMap[c._id.toString()] = c; });
 
-    const jobRequiredSkills = (job.requiredSkills || []).map(s => s.toLowerCase().trim());
-    const jobNiceSkills = (job.niceToHaveSkills || []).map(s => s.toLowerCase().trim());
-    const jobExperience = job.experienceYears || 0;
-
     const results = [];
 
     for (const resume of resumes) {
       const candidate = candidateMap[resume.candidateId.toString()];
       if (!candidate) continue;
 
-      let score = 0;
       const matchedSkills = [];
       const missingSkills = [];
-
-      // --- 1. Qualification scoring (0-25 points) ---
-      const qualRank = {
-        'phd': 25, 'ph.d': 25, 'doctorate': 25,
-        "master's": 20, 'masters': 20, 'm.tech': 20, 'mtech': 20, 'm.sc': 20, 'msc': 20, 'mba': 20, 'me': 20, 'm.e': 20,
-        "bachelor's": 15, 'bachelors': 15, 'b.tech': 15, 'btech': 15, 'b.sc': 15, 'bsc': 15, 'b.e': 15, 'be': 15, 'bca': 15, 'bba': 15,
-        'diploma': 10,
-        'high school': 5, '12th': 5, '10+2': 5
-      };
-      const candidateQual = (candidate.highestQualificationDegree || '').toLowerCase().trim();
-      score += qualRank[candidateQual] || 8;
-
-      // --- 2. Specialization / skill match (0-35 points) ---
-      const candidateSpec = (candidate.specialization || '').toLowerCase().trim();
-      const allJobSkills = [...jobRequiredSkills, ...jobNiceSkills];
-
-      // Check if specialization matches any required skill keyword
-      if (candidateSpec) {
-        for (const skill of jobRequiredSkills) {
-          if (candidateSpec.includes(skill) || skill.includes(candidateSpec)) {
-            matchedSkills.push(skill);
-          }
-        }
-        for (const skill of jobNiceSkills) {
-          if (candidateSpec.includes(skill) || skill.includes(candidateSpec)) {
-            matchedSkills.push(skill);
-          }
-        }
-      }
-
-      // Check resume's already-stored matched skills (if any from prior parsing)
+      // Use any pre-parsed matched skills as hints
       if (resume.matchedSkills && resume.matchedSkills.length > 0) {
         resume.matchedSkills.forEach(s => {
           const lower = s.toLowerCase().trim();
@@ -337,67 +345,90 @@ export async function aiScreenResumes(req, res) {
         });
       }
 
-      // Calculate missing required skills
-      for (const skill of jobRequiredSkills) {
-        if (!matchedSkills.includes(skill)) {
-          missingSkills.push(skill);
-        }
-      }
+      let totalScore = 0;
+      let fitLevel = 'Not Recommended';
+      let redFlags = [];
+      let strongSignals = [];
+      let concerns = [];
+      let scoringError = null;
 
-      if (jobRequiredSkills.length > 0) {
-        const requiredMatchRatio = matchedSkills.filter(s => jobRequiredSkills.includes(s)).length / jobRequiredSkills.length;
-        score += Math.round(requiredMatchRatio * 25);
-      } else {
-        score += 15; // No specific skills required, give baseline
-      }
+      try {
+        // Load or backfill extracted resume text if missing
+        let resumeText = resume.extractedText || '';
+        if (!resumeText) {
+          console.log(`[AI Screening] No cached text for resume ${resume._id}, extracting...`);
+          try {
+            if (resume.filePath) {
+              const absPath = path.resolve(__dirname, '../..', resume.filePath);
+              const buf = readFileToBuffer(absPath);
+              resumeText = await extractResumeTextFromBuffer({
+                buffer: buf,
+                mimeType: resume.mimeType,
+                originalName: resume.originalName || resume.fileName
+              });
+              console.log(`[AI Screening] Extracted ${resumeText.length} chars from local file`);
+            } else if (resume.gcsBucket && resume.gcsObjectName) {
+              const gcs = await getGCS();
+              if (gcs) {
+                const chunks = [];
+                const stream = gcs.downloadFromGCS({ bucketName: resume.gcsBucket, objectName: resume.gcsObjectName });
+                await new Promise((resolve, reject) => {
+                  stream.on('data', (d) => chunks.push(d));
+                  stream.on('end', resolve);
+                  stream.on('error', reject);
+                });
+                const buf = Buffer.concat(chunks);
+                resumeText = await extractResumeTextFromBuffer({
+                  buffer: buf,
+                  mimeType: resume.mimeType,
+                  originalName: resume.originalName || resume.fileName
+                });
+                console.log(`[AI Screening] Extracted ${resumeText.length} chars from GCS`);
+              }
+            }
 
-      if (jobNiceSkills.length > 0) {
-        const niceMatchRatio = matchedSkills.filter(s => jobNiceSkills.includes(s)).length / jobNiceSkills.length;
-        score += Math.round(niceMatchRatio * 10);
-      }
-
-      // --- 3. CGPA / Percentage scoring (0-20 points) ---
-      const cgpaStr = (candidate.cgpaOrPercentage || '').trim();
-      let cgpaScore = 0;
-      if (cgpaStr) {
-        const numVal = parseFloat(cgpaStr.replace(/[^0-9.]/g, ''));
-        if (!isNaN(numVal)) {
-          if (numVal <= 10) {
-            // CGPA scale (out of 10)
-            cgpaScore = Math.round((numVal / 10) * 20);
-          } else if (numVal <= 100) {
-            // Percentage scale
-            cgpaScore = Math.round((numVal / 100) * 20);
+            if (resumeText) {
+              await Resume.findByIdAndUpdate(resume._id, { $set: { extractedText: resumeText } });
+            }
+          } catch (extractErr) {
+            console.error('[AI Screening] Text extraction failed:', extractErr?.message || extractErr);
           }
+        } else {
+          console.log(`[AI Screening] Using cached text (${resumeText.length} chars) for resume ${resume._id}`);
         }
+
+        if (!resumeText || resumeText.length < 50) {
+          console.warn(`[AI Screening] Resume text too short or empty for ${resume._id}, using candidate profile only`);
+        }
+
+        console.log(`[AI Screening] Calling Gemini for resume ${resume._id}, candidate: ${candidate.name}`);
+        const ai = await scoreResumeWithGemini({
+          job,
+          candidateProfile: candidate,
+          resumeText
+        });
+        totalScore = ai.totalScore;
+        fitLevel = ai.fitLevel;
+        redFlags = ai.redFlags;
+        strongSignals = ai.strongSignals;
+        concerns = ai.concerns;
+        console.log(`[AI Screening] Resume ${resume._id} scored: ${totalScore} (${fitLevel})`);
+      } catch (err) {
+        scoringError = err?.message || String(err);
+        console.error('[AI Screening] Gemini scoring failed for resume', resume._id.toString(), scoringError);
+        // Set a default score based on profile if AI fails
+        totalScore = 0;
       }
-      score += cgpaScore;
 
-      // --- 4. Recency / passout year scoring (0-10 points) ---
-      const currentYear = new Date().getFullYear();
-      const passoutYear = candidate.passoutYear;
-      if (passoutYear) {
-        const yearsAgo = currentYear - passoutYear;
-        if (yearsAgo <= 1) score += 10;
-        else if (yearsAgo <= 3) score += 8;
-        else if (yearsAgo <= 5) score += 6;
-        else if (yearsAgo <= 10) score += 4;
-        else score += 2;
-      }
-
-      // --- 5. File uploaded bonus (0-10 points) ---
-      score += 10; // They submitted a resume, so give full credit
-
-      // Clamp score
-      score = Math.min(100, Math.max(0, score));
+      totalScore = Math.min(100, Math.max(0, totalScore));
 
       // Determine status based on threshold
-      const status = score >= threshold ? 'screened-in' : 'screened-out';
+      const status = totalScore >= threshold ? 'screened-in' : 'screened-out';
 
       // Update resume in DB
       await Resume.findByIdAndUpdate(resume._id, {
         $set: {
-          score,
+          score: totalScore,
           matchedSkills: [...new Set(matchedSkills)],
           missingSkills: [...new Set(missingSkills)],
           status
@@ -408,10 +439,14 @@ export async function aiScreenResumes(req, res) {
         resumeId: resume._id,
         candidateId: resume.candidateId,
         candidateName: candidate.name || '',
-        score,
+        score: totalScore,
+        fitLevel,
         status,
         matchedSkills: [...new Set(matchedSkills)],
-        missingSkills: [...new Set(missingSkills)]
+        missingSkills: [...new Set(missingSkills)],
+        redFlags,
+        strongSignals,
+        concerns
       });
     }
 
@@ -430,6 +465,149 @@ export async function aiScreenResumes(req, res) {
     console.error('AI screen error', err?.message || err);
     return res.status(500).json({ message: err?.message || 'AI screening failed' });
   }
+}
+
+// Async AI screening with progress reporting (HR/Recruiter only)
+export async function startAiScreenRun(req, res) {
+  try {
+    const { jobId, resumeIds, threshold = 50 } = req.body;
+    if (!jobId) return res.status(400).json({ message: 'jobId is required' });
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(400).json({ message: 'GEMINI_API_KEY is not configured on the server.' });
+    }
+
+    const job = await JobOpening.findById(jobId);
+    if (!job || job.isDeleted) return res.status(404).json({ message: 'Job not found' });
+
+    const filter = { jobId, isDeleted: false };
+    if (Array.isArray(resumeIds) && resumeIds.length > 0) {
+      filter._id = { $in: resumeIds };
+    }
+    const resumes = await Resume.find(filter);
+    if (resumes.length === 0) return res.status(404).json({ message: 'No resumes found to screen' });
+
+    const run = createRun({ jobId, total: resumes.length });
+
+    console.log(`[AI Screening] Starting async run ${run.runId} for ${resumes.length} resumes, threshold: ${threshold}`);
+
+    // Kick off background processing (best-effort)
+    (async () => {
+      try {
+        // Candidate map
+        const candidateIds = [...new Set(resumes.map(r => r.candidateId.toString()))];
+        const candidates = await User.find({ _id: { $in: candidateIds } });
+        const candidateMap = {};
+        candidates.forEach(c => { candidateMap[c._id.toString()] = c; });
+
+        let screenedIn = 0;
+        let screenedOut = 0;
+        let processed = 0;
+
+        for (const resume of resumes) {
+          const candidate = candidateMap[resume.candidateId.toString()];
+          if (!candidate) {
+            console.warn(`[AI Screening] No candidate found for resume ${resume._id}`);
+            processed += 1;
+            updateRun(run.runId, { processed, screenedIn, screenedOut });
+            continue;
+          }
+
+          let resumeText = resume.extractedText || '';
+          if (!resumeText) {
+            console.log(`[AI Screening] Extracting text for resume ${resume._id}...`);
+            try {
+              if (resume.filePath) {
+                const absPath = path.resolve(__dirname, '../..', resume.filePath);
+                const buf = readFileToBuffer(absPath);
+                resumeText = await extractResumeTextFromBuffer({
+                  buffer: buf,
+                  mimeType: resume.mimeType,
+                  originalName: resume.originalName || resume.fileName
+                });
+                console.log(`[AI Screening] Extracted ${resumeText.length} chars from ${resume.fileName}`);
+              } else if (resume.gcsBucket && resume.gcsObjectName) {
+                const gcs = await getGCS();
+                if (gcs) {
+                  const chunks = [];
+                  const stream = gcs.downloadFromGCS({ bucketName: resume.gcsBucket, objectName: resume.gcsObjectName });
+                  await new Promise((resolve, reject) => {
+                    stream.on('data', (d) => chunks.push(d));
+                    stream.on('end', resolve);
+                    stream.on('error', reject);
+                  });
+                  const buf = Buffer.concat(chunks);
+                  resumeText = await extractResumeTextFromBuffer({
+                    buffer: buf,
+                    mimeType: resume.mimeType,
+                    originalName: resume.originalName || resume.fileName
+                  });
+                  console.log(`[AI Screening] Extracted ${resumeText.length} chars from GCS`);
+                }
+              }
+              if (resumeText) {
+                await Resume.findByIdAndUpdate(resume._id, { $set: { extractedText: resumeText } });
+              }
+            } catch (extractErr) {
+              console.error(`[AI Screening] Text extraction error for ${resume._id}:`, extractErr?.message);
+            }
+          }
+
+          let totalScore = 0;
+          try {
+            console.log(`[AI Screening] Scoring resume ${resume._id} for ${candidate.name}...`);
+            const ai = await scoreResumeWithGemini({ job, candidateProfile: candidate, resumeText });
+            totalScore = Math.min(100, Math.max(0, ai.totalScore));
+            console.log(`[AI Screening] Resume ${resume._id} scored: ${totalScore}`);
+          } catch (e) {
+            console.error(`[AI Screening] Scoring failed for ${resume._id}:`, e?.message || e);
+            totalScore = 0;
+          }
+
+          const status = totalScore >= threshold ? 'screened-in' : 'screened-out';
+          if (status === 'screened-in') screenedIn += 1;
+          else screenedOut += 1;
+
+          await Resume.findByIdAndUpdate(resume._id, { $set: { score: totalScore, status } });
+
+          processed += 1;
+          updateRun(run.runId, { processed, screenedIn, screenedOut });
+        }
+
+        console.log(`[AI Screening] Run ${run.runId} complete: ${screenedIn} in, ${screenedOut} out`);
+        updateRun(run.runId, { done: true });
+      } catch (e) {
+        console.error(`[AI Screening] Run ${run.runId} failed:`, e?.message || e);
+        updateRun(run.runId, { done: true, error: e?.message || String(e) });
+      }
+    })();
+
+    return res.json({ runId: run.runId, total: run.total });
+  } catch (err) {
+    console.error('Start AI screen run error', err?.message || err);
+    return res.status(500).json({ message: 'Failed to start AI screening' });
+  }
+}
+
+export async function getAiScreenRunProgress(req, res) {
+  const runId = req.params.runId;
+  const run = getRun(runId);
+  if (!run) return res.status(404).json({ message: 'Run not found' });
+
+  const processed = Number(run.processed) || 0;
+  const total = Number(run.total) || 0;
+  const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+  return res.json({
+    runId: run.runId,
+    jobId: run.jobId,
+    total,
+    processed,
+    screenedIn: run.screenedIn || 0,
+    screenedOut: run.screenedOut || 0,
+    percent,
+    done: Boolean(run.done),
+    error: run.error || null
+  });
 }
 
 // Pipeline stage order for validation

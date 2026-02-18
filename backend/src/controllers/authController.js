@@ -34,12 +34,14 @@ function signRefreshToken(user) {
   return jwt.sign({ sub: user.id, tokenType: 'refresh' }, refreshSecret, { expiresIn: refreshTtl });
 }
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 function setRefreshCookie(res, token) {
   const maxAge = ttlToMs(refreshTtl) || 7 * 24 * 60 * 60 * 1000;
   res.cookie('refreshToken', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax', // 'none' required for cross-origin in production
     maxAge,
     path: '/'
   });
@@ -63,29 +65,28 @@ export async function register(req, res) {
 
     const passwordHash = await bcrypt.hash(password, 10);
     
-    // Generate candidate ID for candidates only
-    let candidateId = null;
-    
-    if (role === 'candidate') {
-      // Generate a unique candidate ID (e.g., CAND-timestamp-random)
-      const timestamp = Date.now().toString(36).toUpperCase();
-      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-      candidateId = `CAND-${timestamp}-${random}`;
-    }
-    
-    const user = await User.create({
+    let userData = {
       email: email.toLowerCase().trim(),
       password: passwordHash,
       name,
       role,
-      candidateId,
       employeeId: role !== 'candidate' ? employeeId : undefined,
       companyName: role !== 'candidate' ? companyName : undefined,
       highestQualificationDegree,
       specialization,
       cgpaOrPercentage,
       passoutYear
-    });
+    };
+
+    // Only add candidateId if role is candidate
+    if (role === 'candidate') {
+      const timestamp = Date.now().toString(36).toUpperCase();
+      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+      userData.candidateId = `CAND-${timestamp}-${random}`;
+    }
+
+    const user = await User.create(userData);
+
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user);
@@ -184,8 +185,8 @@ export async function logout(req, res) {
 
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/'
     });
     return res.json({ message: 'Logged out' });
@@ -247,8 +248,8 @@ export async function deleteAccount(req, res) {
     // Clear the refresh token cookie
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/'
     });
 

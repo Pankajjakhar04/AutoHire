@@ -1,38 +1,98 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState, useTransition } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { deleteJob, fetchJobs, Job } from '../services/jobs';
+import { checkJobEligibility, deleteJob, fetchJobs, Job, type EligibilityCheckResult } from '../services/jobs';
+
+const specializationOptions = [
+  'Computer Science',
+  'Information Technology',
+  'Electronics',
+  'Mechanical',
+  'Civil',
+  'Business Administration',
+  'Commerce',
+  'Arts',
+  'Science'
+];
+
+const qualificationOptions = [
+  'Engineering',
+  'MBA',
+  'BSc',
+  'MSc',
+  'CA',
+  'CFA',
+  'PG Diploma'
+];
 
 export default function JobsList() {
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | 'active' | 'closed'>('all');
   const [searchInput, setSearchInput] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const requestSeq = useRef(0);
+  const [isPending, startTransition] = useTransition();
+  
+  // Eligibility check state
+  const [eligibilityJobId, setEligibilityJobId] = useState<string | null>(null);
+  const [eligibilityChecking, setEligibilityChecking] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState('');
+  const [eligibilityResult, setEligibilityResult] = useState<EligibilityCheckResult | null>(null);
+  const [eligibilityForm, setEligibilityForm] = useState<{
+    educationLevel: '' | 'highSchool' | 'diploma' | 'bachelors' | 'masters' | 'phd';
+    specialization: string;
+    academicQualification: string;
+    experienceYears: string;
+  }>({
+    educationLevel: '',
+    specialization: '',
+    academicQualification: '',
+    experienceYears: ''
+  });
+  const [specializationOther, setSpecializationOther] = useState(false);
+  const [qualificationOther, setQualificationOther] = useState(false);
+  const [customCriteriaAccepted, setCustomCriteriaAccepted] = useState<number[]>([]);
 
   const isRecruiter = user?.role === 'recruiterAdmin' || user?.role === 'hrManager';
+  const isCandidate = user?.role === 'candidate';
 
   useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedQuery(searchInput.trim());
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    const mySeq = ++requestSeq.current;
+    const isFirst = initialLoading && jobs.length === 0;
+    if (!isFirst) setIsFetching(true);
+    setError('');
+
     (async () => {
-      setLoading(true);
-      setError('');
       try {
         const data = await fetchJobs({
-          q: query || undefined,
+          q: debouncedQuery || undefined,
           status: status === 'all' ? undefined : status
         });
-        setJobs(data);
+        if (mySeq !== requestSeq.current) return;
+        startTransition(() => setJobs(data));
       } catch (err: any) {
+        if (mySeq !== requestSeq.current) return;
         setError(err?.response?.data?.message || 'Failed to load jobs');
       } finally {
-        setLoading(false);
+        if (mySeq !== requestSeq.current) return;
+        setInitialLoading(false);
+        setIsFetching(false);
       }
     })();
-  }, [query, status]);
+  }, [debouncedQuery, status]);
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this job?')) return;
@@ -46,10 +106,108 @@ export default function JobsList() {
 
   const handleSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setQuery(searchInput.trim());
+    setDebouncedQuery(searchInput.trim());
   };
 
-  if (loading) {
+  const openEligibility = (job: Job) => {
+    const criteria = job.eligibilityCriteria;
+    const educationLevels = Array.isArray(criteria?.educationMinLevel) 
+      ? criteria.educationMinLevel 
+      : criteria?.educationMinLevel 
+        ? [criteria.educationMinLevel] 
+        : [];
+    const hasCriteria =
+      educationLevels.length > 0 ||
+      Boolean(criteria?.specialization) ||
+      Boolean(criteria?.academicQualification) ||
+      criteria?.minExperienceYears !== undefined ||
+      (criteria?.customCriteria && criteria.customCriteria.length > 0);
+    
+    if (!hasCriteria) {
+      alert('This job does not have eligibility criteria configured.');
+      return;
+    }
+    
+    setEligibilityJobId(job._id);
+    setEligibilityError('');
+    setEligibilityResult(null);
+    setCustomCriteriaAccepted([]);
+    setSpecializationOther(false);
+    setQualificationOther(false);
+    setEligibilityForm({
+      educationLevel: '',
+      specialization: '',
+      academicQualification: '',
+      experienceYears: ''
+    });
+  };
+
+  const closeEligibility = () => {
+    setEligibilityJobId(null);
+    setEligibilityError('');
+    setEligibilityResult(null);
+  };
+
+  const toggleCustomCriterion = (idx: number) => {
+    setCustomCriteriaAccepted((prev) => (prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]));
+  };
+
+  const validateEligibilityInput = (criteria: Job['eligibilityCriteria']) => {
+    const missing: string[] = [];
+    const educationLevels = Array.isArray(criteria?.educationMinLevel) 
+      ? criteria.educationMinLevel 
+      : criteria?.educationMinLevel 
+        ? [criteria.educationMinLevel] 
+        : [];
+    if (educationLevels.length > 0 && !eligibilityForm.educationLevel) missing.push('Education level');
+    if (criteria?.minExperienceYears !== undefined && eligibilityForm.experienceYears.trim() === '') missing.push('Years of experience');
+    if (criteria?.specialization && eligibilityForm.specialization.trim() === '') missing.push('Specialization / Stream');
+    if (criteria?.academicQualification && eligibilityForm.academicQualification.trim() === '') missing.push('Academic qualification');
+    const custom = criteria?.customCriteria || [];
+    if (custom.length > 0 && customCriteriaAccepted.length !== custom.length) missing.push('Custom criteria confirmations');
+    return missing;
+  };
+
+  const runEligibilityCheck = async () => {
+    if (!eligibilityJobId) return;
+    setEligibilityError('');
+    setEligibilityResult(null);
+
+    const job = jobs.find((j) => j._id === eligibilityJobId);
+    if (!job) return;
+
+    const criteria = job.eligibilityCriteria;
+    const missing = validateEligibilityInput(criteria);
+    if (missing.length > 0) {
+      setEligibilityError(`Please provide: ${missing.join(', ')}`);
+      return;
+    }
+
+    const expRaw = eligibilityForm.experienceYears.trim();
+    const expNum = expRaw === '' ? undefined : Number(expRaw);
+    if (expNum !== undefined && (Number.isNaN(expNum) || expNum < 0)) {
+      setEligibilityError('Experience must be a valid non-negative number.');
+      return;
+    }
+
+    setEligibilityChecking(true);
+    try {
+      const result = await checkJobEligibility(eligibilityJobId, {
+        educationLevel: (eligibilityForm.educationLevel || undefined) as 'highSchool' | 'diploma' | 'bachelors' | 'masters' | 'phd' | undefined,
+        specialization: eligibilityForm.specialization.trim() || undefined,
+        academicQualification: eligibilityForm.academicQualification.trim() || undefined,
+        experienceYears: expNum,
+        customCriteriaAccepted: customCriteriaAccepted
+      });
+      setEligibilityResult(result);
+    } catch (err: any) {
+      setEligibilityError(err?.response?.data?.message || 'Eligibility check failed');
+    } finally {
+      setEligibilityChecking(false);
+    }
+  };
+
+  if (initialLoading && jobs.length === 0 && !error) {
     return (
       <div className="page">
         <div style={{
@@ -74,7 +232,7 @@ export default function JobsList() {
     );
   }
 
-  if (error) {
+  if (error && jobs.length === 0) {
     return (
       <div className="page">
         <div style={{
@@ -125,6 +283,11 @@ export default function JobsList() {
           <p className="muted" style={{ margin: 0, fontSize: '0.95rem' }}>
             {jobs.length} {jobs.length === 1 ? 'position' : 'positions'} available
           </p>
+          {error && (
+            <p className="error" style={{ marginTop: '0.75rem' }}>
+              ⚠️ {error}
+            </p>
+          )}
         </div>
         {isRecruiter && (
           <button 
@@ -172,6 +335,18 @@ export default function JobsList() {
               paddingLeft: '2.5rem'
             }}
           />
+          {(isFetching || isPending) && (
+            <span style={{
+              position: 'absolute',
+              right: '0.75rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '0.8rem',
+              color: 'var(--muted)'
+            }}>
+              Searching…
+            </span>
+          )}
         </div>
         <select 
           value={status} 
@@ -184,7 +359,7 @@ export default function JobsList() {
           <option value="active">Active</option>
           <option value="closed">Closed</option>
         </select>
-        <button type="submit" style={{ width: '100%' }}>Search</button>
+        <button type="submit" style={{ width: '100%' }}>{(isFetching || isPending) ? 'Searching…' : 'Search'}</button>
       </form>
 
       {/* Job Listings */}
@@ -373,6 +548,49 @@ export default function JobsList() {
                     🎯 Recruitment
                   </Link>
                 )}
+                {isCandidate && (() => {
+                  const criteria = job.eligibilityCriteria;
+                  const educationLevels = Array.isArray(criteria?.educationMinLevel) 
+                    ? criteria.educationMinLevel 
+                    : criteria?.educationMinLevel 
+                      ? [criteria.educationMinLevel] 
+                      : [];
+                  const hasCriteria =
+                    educationLevels.length > 0 ||
+                    Boolean(criteria?.specialization) ||
+                    Boolean(criteria?.academicQualification) ||
+                    criteria?.minExperienceYears !== undefined ||
+                    (criteria?.customCriteria && criteria.customCriteria.length > 0);
+                  
+                  return hasCriteria ? (
+                    <button
+                      onClick={() => openEligibility(job)}
+                      style={{
+                        padding: '0.6rem 1rem',
+                        borderRadius: 'var(--radius)',
+                        fontWeight: '600',
+                        fontSize: '0.875rem',
+                        background: 'rgba(5, 150, 105, 0.1)',
+                        color: '#059669',
+                        border: '1px solid rgba(5, 150, 105, 0.3)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'inline-block',
+                        textAlign: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(5, 150, 105, 0.2)';
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(5, 150, 105, 0.1)';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }}
+                    >
+                      ✓ Check Eligibility
+                    </button>
+                  ) : null;
+                })()}
                 <Link 
                   to={`/jobs/${job._id}`}
                   style={{
@@ -453,6 +671,227 @@ export default function JobsList() {
           ))}
         </div>
       )}
+
+      {/* Eligibility Check Modal */}
+      {eligibilityJobId && (() => {
+        const job = jobs.find((j) => j._id === eligibilityJobId);
+        if (!job) return null;
+        const criteria = job.eligibilityCriteria;
+        
+        return (
+          <div
+            className="modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) closeEligibility();
+            }}
+          >
+            <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <h3>Check Eligibility - {job.title}</h3>
+                  <p className="muted">Enter your details to see if you meet the job's eligibility criteria.</p>
+                </div>
+                <button type="button" className="modal-close" onClick={closeEligibility}>Close</button>
+              </div>
+
+              {(() => {
+                const educationLevels = Array.isArray(criteria?.educationMinLevel) 
+                  ? criteria.educationMinLevel 
+                  : criteria?.educationMinLevel 
+                    ? [criteria.educationMinLevel] 
+                    : [];
+                return educationLevels.length > 0 ? (
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontWeight: 600, fontSize: '0.875rem' }}>
+                    Education level (required)
+                    <select
+                      value={eligibilityForm.educationLevel}
+                      onChange={(e) => setEligibilityForm((p) => ({ ...p, educationLevel: e.target.value as any }))}
+                    >
+                      <option value="">Select</option>
+                      <option value="highSchool">High School</option>
+                      <option value="diploma">Diploma</option>
+                      <option value="bachelors">Bachelor&apos;s</option>
+                      <option value="masters">Master&apos;s</option>
+                      <option value="phd">PhD</option>
+                    </select>
+                    <p className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                      Accepted levels: {educationLevels.map((level) => {
+                        const mapping: { [key: string]: string } = {
+                          highSchool: 'High School',
+                          diploma: 'Diploma',
+                          bachelors: "Bachelor's",
+                          masters: "Master's",
+                          phd: 'PhD'
+                        };
+                        return mapping[level] || level;
+                      }).join(', ')}. Higher degrees satisfy lower requirements.
+                    </p>
+                  </label>
+                ) : null;
+              })()}
+
+              {criteria?.specialization && (
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontWeight: 600, fontSize: '0.875rem', marginTop: '0.75rem' }}>
+                  Specialization / Stream (required)
+                  <select
+                    value={
+                      specializationOther || (eligibilityForm.specialization && !specializationOptions.includes(eligibilityForm.specialization))
+                        ? 'other'
+                        : eligibilityForm.specialization
+                    }
+                    onChange={(e) => {
+                      if (e.target.value === 'other') {
+                        setSpecializationOther(true);
+                        if (!eligibilityForm.specialization || specializationOptions.includes(eligibilityForm.specialization)) {
+                          setEligibilityForm((p) => ({ ...p, specialization: '' }));
+                        }
+                      } else {
+                        setSpecializationOther(false);
+                        setEligibilityForm((p) => ({ ...p, specialization: e.target.value }));
+                      }
+                    }}
+                  >
+                    <option value="">Select</option>
+                    {specializationOptions.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                    <option value="other">Other</option>
+                  </select>
+                  {(specializationOther || (eligibilityForm.specialization && !specializationOptions.includes(eligibilityForm.specialization))) && (
+                    <input
+                      value={eligibilityForm.specialization}
+                      onChange={(e) => {
+                        setEligibilityForm((p) => ({ ...p, specialization: e.target.value }));
+                        if (!specializationOptions.includes(e.target.value)) {
+                          setSpecializationOther(true);
+                        }
+                      }}
+                      placeholder="Enter specialization"
+                      style={{ marginTop: '0.5rem' }}
+                    />
+                  )}
+                </label>
+              )}
+
+              {criteria?.minExperienceYears !== undefined && (
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontWeight: 600, fontSize: '0.875rem', marginTop: '0.75rem' }}>
+                  Years of experience (required)
+                  <input
+                    type="number"
+                    min={0}
+                    value={eligibilityForm.experienceYears}
+                    onChange={(e) => setEligibilityForm((p) => ({ ...p, experienceYears: e.target.value }))}
+                    placeholder="e.g. 2"
+                  />
+                </label>
+              )}
+
+              {criteria?.academicQualification && (
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontWeight: 600, fontSize: '0.875rem', marginTop: '0.75rem' }}>
+                  Academic qualification (required)
+                  <select
+                    value={
+                      qualificationOther || (eligibilityForm.academicQualification && !qualificationOptions.includes(eligibilityForm.academicQualification))
+                        ? 'other'
+                        : eligibilityForm.academicQualification
+                    }
+                    onChange={(e) => {
+                      if (e.target.value === 'other') {
+                        setQualificationOther(true);
+                        if (!eligibilityForm.academicQualification || qualificationOptions.includes(eligibilityForm.academicQualification)) {
+                          setEligibilityForm((p) => ({ ...p, academicQualification: '' }));
+                        }
+                      } else {
+                        setQualificationOther(false);
+                        setEligibilityForm((p) => ({ ...p, academicQualification: e.target.value }));
+                      }
+                    }}
+                  >
+                    <option value="">Select</option>
+                    {qualificationOptions.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                    <option value="other">Other</option>
+                  </select>
+                  {(qualificationOther || (eligibilityForm.academicQualification && !qualificationOptions.includes(eligibilityForm.academicQualification))) && (
+                    <input
+                      value={eligibilityForm.academicQualification}
+                      onChange={(e) => {
+                        setEligibilityForm((p) => ({ ...p, academicQualification: e.target.value }));
+                        if (!qualificationOptions.includes(e.target.value)) {
+                          setQualificationOther(true);
+                        }
+                      }}
+                      placeholder="Enter qualification"
+                      style={{ marginTop: '0.5rem' }}
+                    />
+                  )}
+                </label>
+              )}
+
+              {(criteria?.customCriteria || []).length > 0 && (
+                <div style={{ marginTop: '0.9rem' }}>
+                  <p style={{ fontWeight: 700, marginBottom: '0.25rem' }}>Custom criteria (confirm all)</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {(criteria?.customCriteria || []).map((c, idx) => (
+                      <label
+                        key={`${idx}-${c}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '0.5rem',
+                          padding: '0.6rem 0.75rem',
+                          border: '1px solid rgba(10, 102, 194, 0.15)',
+                          borderRadius: '8px',
+                          background: 'rgba(10, 102, 194, 0.04)',
+                          fontSize: '0.875rem',
+                          fontWeight: 500
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={customCriteriaAccepted.includes(idx)}
+                          onChange={() => toggleCustomCriterion(idx)}
+                          style={{ marginTop: '0.2rem' }}
+                        />
+                        <span>I meet: {c}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {eligibilityError && <p className="error" style={{ marginTop: '0.75rem' }}>{eligibilityError}</p>}
+
+              {eligibilityResult && eligibilityResult.eligible && (
+                <p className="success-message" style={{ marginTop: '0.75rem' }}>
+                  You meet the eligibility criteria. You can proceed with your application.
+                </p>
+              )}
+
+              {eligibilityResult && !eligibilityResult.eligible && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <p className="error" style={{ marginBottom: '0.25rem' }}>
+                    {eligibilityResult.warning || 'There is very minimal chance of screening as you are currently ineligible for this position.'}
+                  </p>
+                  <p className="muted" style={{ margin: 0 }}>
+                    You may still proceed to apply, but please note the warning above.
+                  </p>
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" className="ghost" onClick={closeEligibility}>Cancel</button>
+                <button type="button" onClick={runEligibilityCheck} disabled={eligibilityChecking}>
+                  {eligibilityChecking ? 'Checking...' : 'Evaluate'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <style>{`
         @keyframes spin {

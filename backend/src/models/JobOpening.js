@@ -9,6 +9,21 @@ const salaryRangeSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const eligibilityCriteriaSchema = new mongoose.Schema(
+  {
+    educationMinLevel: {
+      type: [String],
+      enum: ['highSchool', 'diploma', 'bachelors', 'masters', 'phd'],
+      default: []
+    },
+    specialization: { type: String, trim: true },
+    academicQualification: { type: String, trim: true },
+    minExperienceYears: { type: Number, min: 0 },
+    customCriteria: [{ type: String, trim: true }]
+  },
+  { _id: false }
+);
+
 const jobOpeningSchema = new mongoose.Schema(
   {
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -18,6 +33,7 @@ const jobOpeningSchema = new mongoose.Schema(
     requiredSkills: [{ type: String, trim: true }],
     niceToHaveSkills: [{ type: String, trim: true }],
     experienceYears: { type: Number, min: 0 },
+    eligibilityCriteria: eligibilityCriteriaSchema,
     salaryRange: salaryRangeSchema,
     location: { type: String, trim: true },
     status: { type: String, enum: ['active', 'closed'], default: 'active' },

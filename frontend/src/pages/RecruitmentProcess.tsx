@@ -6,7 +6,8 @@ import {
   listResumesForJob,
   Resume,
   screenResumes,
-  aiScreenResumes,
+  getAiScreenProgress,
+  startAiScreenResumes,
   advanceCandidates,
   listResumesByStage,
   exportStageToExcel,
@@ -41,6 +42,8 @@ export default function RecruitmentProcess() {
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiProgress, setAiProgress] = useState<{ total: number; processed: number; percent: number } | null>(null);
+  const [targetScore, setTargetScore] = useState<number>(60);
 
   // Stage-specific state
   const [stageResumes, setStageResumes] = useState<Resume[]>([]);
@@ -179,16 +182,28 @@ export default function RecruitmentProcess() {
     if (!selectedJobId) return alert('Select a job first');
     setAiLoading(true);
     setAiResult(null);
+    setAiProgress(null);
     try {
       const idsToScreen = selectedIds.size > 0 ? Array.from(selectedIds) : undefined;
-      const result = await aiScreenResumes(selectedJobId, idsToScreen, 50);
+      const started = await startAiScreenResumes(selectedJobId, idsToScreen, targetScore);
+
+      // Poll progress until done
+      let done = false;
+      while (!done) {
+        const p = await getAiScreenProgress(started.runId);
+        setAiProgress({ total: p.total, processed: p.processed, percent: p.percent });
+        if (p.error) throw new Error(p.error);
+        done = p.done;
+        if (!done) await new Promise((r) => setTimeout(r, 900));
+      }
+
       const updatedResumes = await listResumesForJob(selectedJobId);
       setResumes(updatedResumes);
       setSelectedIds(new Set());
-      setAiResult(`AI Screening complete: ${result.screenedIn} screened in, ${result.screenedOut} screened out (threshold: ${result.threshold})`);
+      setAiResult(`AI Screening complete: updated ${updatedResumes.length} resume(s).`);
       setTimeout(() => setAiResult(null), 6000);
     } catch (err: any) {
-      alert(err?.response?.data?.message || 'AI Screening failed');
+      alert(err?.response?.data?.message || err?.message || 'AI Screening failed');
     } finally {
       setAiLoading(false);
     }
@@ -470,7 +485,44 @@ export default function RecruitmentProcess() {
                   <option value="screened-in">Screened in</option>
                   <option value="screened-out">Screened out</option>
                 </select>
-                <div className="toolbar-actions" style={{ 
+                <label style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem',
+                  background: 'white',
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid rgba(139, 92, 246, 0.3)'
+                }}>
+                  <span style={{ 
+                    fontSize: '0.65rem', 
+                    fontWeight: '600',
+                    color: '#7C3AED',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>
+                    Target Score
+                  </span>
+                  <select
+                    value={targetScore}
+                    onChange={(e) => setTargetScore(Number(e.target.value))}
+                    style={{ 
+                      background: 'transparent',
+                      border: 'none',
+                      fontWeight: '600',
+                      fontSize: '0.9rem',
+                      color: '#7C3AED',
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                  >
+                    <option value={50}>≥ 50</option>
+                    <option value={60}>≥ 60</option>
+                    <option value={70}>≥ 70</option>
+                    <option value={80}>≥ 80</option>
+                  </select>
+                </label>
+                <div className="toolbar-actions" style={{
                   display: 'flex', 
                   gap: '0.5rem', 
                   flexWrap: 'wrap',
@@ -521,10 +573,11 @@ export default function RecruitmentProcess() {
                   <button
                     className="btn-success"
                     onClick={async () => {
-                      const screenedInIds = filteredResumes.filter(r => r.status === 'screened-in' && selectedIds.has(r._id)).map(r => r._id);
-                      if (screenedInIds.length === 0) return alert('Select screened-in candidates to advance');
+                      const allScreenedInIds = filteredResumes.filter(r => r.status === 'screened-in').map(r => r._id);
+                      if (allScreenedInIds.length === 0) return alert('No screened-in candidates to advance');
+                      if (!confirm(`Move all ${allScreenedInIds.length} screened-in candidate(s) to Assessment?`)) return;
                       try {
-                        const result = await advanceCandidates(screenedInIds, 'assessment');
+                        const result = await advanceCandidates(allScreenedInIds, 'assessment');
                         setAiResult(`${result.message} | Emails: ${result.emailsSent}`);
                         const updated = await listResumesForJob(selectedJobId);
                         setResumes(updated);
@@ -534,13 +587,14 @@ export default function RecruitmentProcess() {
                         alert(err?.response?.data?.message || 'Failed to advance');
                       }
                     }}
-                    disabled={selectedIds.size === 0}
+                    disabled={filteredResumes.filter(r => r.status === 'screened-in').length === 0}
                     style={{
                       fontSize: '0.875rem',
-                      padding: '0.6rem 1rem'
+                      padding: '0.6rem 1rem',
+                      background: 'linear-gradient(135deg, #059669, #047857)'
                     }}
                   >
-                    → Advance to Assessment
+                    → Move All Screened-In ({filteredResumes.filter(r => r.status === 'screened-in').length})
                   </button>
                   <button
                     style={{ 
@@ -562,7 +616,68 @@ export default function RecruitmentProcess() {
                 </div>
               </div>
 
-              {aiResult && (
+              {/* Live Progress Bar during AI Screening */}
+              {aiLoading && aiProgress && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))',
+                  border: '1px solid rgba(139, 92, 246, 0.3)',
+                  borderLeft: '4px solid #7C3AED',
+                  borderRadius: 'var(--radius)',
+                  padding: '1.25rem',
+                  marginBottom: '1.25rem',
+                  animation: 'slideUp 0.4s ease'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                    <p style={{ 
+                      margin: 0, 
+                      color: '#7C3AED', 
+                      fontWeight: '700',
+                      fontSize: '1rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      🤖 AI Screening in Progress...
+                    </p>
+                    <span style={{
+                      background: 'rgba(139, 92, 246, 0.2)',
+                      color: '#7C3AED',
+                      padding: '0.25rem 0.75rem',
+                      borderRadius: '12px',
+                      fontSize: '0.85rem',
+                      fontWeight: '700'
+                    }}>
+                      {aiProgress.percent}%
+                    </span>
+                  </div>
+                  <div style={{
+                    height: '12px',
+                    background: 'rgba(139, 92, 246, 0.15)',
+                    borderRadius: '999px',
+                    overflow: 'hidden',
+                    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)'
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${aiProgress.percent}%`,
+                      background: 'linear-gradient(90deg, #8B5CF6, #7C3AED, #6D28D9)',
+                      transition: 'width 0.3s ease',
+                      boxShadow: '0 0 10px rgba(139, 92, 246, 0.5)'
+                    }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.75rem' }}>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#6B7280' }}>
+                      Processing resume <strong style={{ color: '#7C3AED' }}>{aiProgress.processed}</strong> of <strong>{aiProgress.total}</strong>
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#6B7280' }}>
+                      ⏱️ Please wait...
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Success Result */}
+              {aiResult && !aiLoading && (
                 <div style={{
                   background: 'rgba(5, 150, 105, 0.1)',
                   border: '1px solid rgba(5, 150, 105, 0.3)',
@@ -675,8 +790,11 @@ export default function RecruitmentProcess() {
                       <span style={{ fontWeight: '600' }}>{r.candidateName || '-'}</span>
                       <span>{r.candidateEmail || '-'}</span>
                       <span>{r.highestQualification || '-'}</span>
-                      <span style={{ fontWeight: '600', color: 'var(--primary)' }}>
-                        {r.score !== undefined ? r.score.toFixed(2) : '-'}
+                      <span style={{ 
+                        fontWeight: '600', 
+                        color: r.score != null && r.score >= targetScore ? '#059669' : r.score != null && r.score > 0 ? '#DC2626' : 'var(--primary)'
+                      }}>
+                        {r.score != null && r.score > 0 ? r.score.toFixed(2) : (r.status === 'uploaded' ? 'Pending' : '0.00')}
                       </span>
                       <span>{r.cgpa || '-'}</span>
                       <span>{r.specialization || '-'}</span>
@@ -1108,8 +1226,11 @@ function PipelineStagePanel({
               <span style={{ fontWeight: '600' }}>{r.candidateName || '-'}</span>
               <span>{r.candidateEmail || '-'}</span>
               <span>{r.highestQualification || '-'}</span>
-              <span style={{ fontWeight: '600', color: 'var(--primary)' }}>
-                {r.score !== undefined ? r.score.toFixed(2) : '-'}
+              <span style={{ 
+                fontWeight: '600', 
+                color: r.score != null && r.score > 0 ? '#059669' : 'var(--primary)'
+              }}>
+                {r.score != null && r.score > 0 ? r.score.toFixed(2) : '-'}
               </span>
               <span>{r.cgpa || '-'}</span>
               <span>{r.specialization || '-'}</span>

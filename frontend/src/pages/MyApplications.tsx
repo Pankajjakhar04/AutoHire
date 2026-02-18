@@ -76,15 +76,25 @@ export default function MyApplications() {
           {resumes.map((r) => (
             <div key={r._id} className="table-row">
               <span>
-                {r.jobId ? (
-                  <Link to={`/jobs/${typeof r.jobId === 'string' ? r.jobId : r.jobId?._id || (r as any).populatedJobId?._id || ''}`} style={{ cursor: 'pointer', color: '#2563eb' }}>
-                    {r.job?.title || (r as any).jobId?.title || (r as any).populatedJobId?.title || 'Job'}
-                  </Link>
-                ) : (
-                  r.job?.title || (r as any).jobId?.title || (r as any).populatedJobId?.title || 'Job'
-                )}
+                {(() => {
+                  const jobDoc = typeof r.jobId === 'string' ? (r.populatedJobId || r.job) : r.jobId;
+                  const jobId = typeof r.jobId === 'string' ? r.jobId : r.jobId?._id;
+                  const title = jobDoc?.title || 'Job';
+                  if (!jobId) return title;
+                  return (
+                    <Link to={`/jobs/${jobId}`} style={{ cursor: 'pointer', color: '#2563eb' }}>
+                      {title}
+                    </Link>
+                  );
+                })()}
               </span>
-              <span>{(r as any).jobId?.jobCode || (r as any).populatedJobId?.jobCode || (typeof r.jobId === 'string' ? r.jobId : r.jobId?._id || (r as any).populatedJobId?._id || '-')}</span>
+              <span>
+                {(() => {
+                  const jobDoc = typeof r.jobId === 'string' ? (r.populatedJobId || r.job) : r.jobId;
+                  const jobId = typeof r.jobId === 'string' ? r.jobId : r.jobId?._id;
+                  return jobDoc?.jobCode || jobId || '-';
+                })()}
+              </span>
               <span>{new Date(r.createdAt || '').toLocaleString()}</span>
               <span>{r.status}</span>
               <span className="row-actions">

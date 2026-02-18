@@ -18,6 +18,7 @@ const resumeSchema = new mongoose.Schema(
     matchedSkills: [{ type: String }],
     missingSkills: [{ type: String }],
     score: { type: Number, min: 0, max: 100 },
+    extractedText: { type: String },
     isDeleted: { type: Boolean, default: false }
   },
   { timestamps: true }
