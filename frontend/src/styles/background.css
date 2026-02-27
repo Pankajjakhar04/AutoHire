@@ -1,0 +1,63 @@
+/* Background Image Styles */
+.background-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/images/Background.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  z-index: -1;
+  min-height: 100vh;
+}
+
+/* Semi-transparent overlay for better text readability */
+.background-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.92);
+  z-index: -1;
+  min-height: 100vh;
+}
+
+/* Alternative: Dark overlay for better contrast */
+.dark-overlay {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+/* Content wrapper to ensure proper layering */
+.content-wrapper {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .background-container {
+    background-attachment: scroll;
+  }
+  
+  .background-overlay {
+    background-color: rgba(255, 255, 255, 0.9);
+  }
+}
+
+/* For specific pages */
+.login-background {
+  background-image: url('/images/login-bg.jpg');
+}
+
+.dashboard-background {
+  background-image: url('/images/dashboard-bg.jpg');
+}
+
+.jobs-background {
+  background-image: url('/images/jobs-bg.jpg');
+}
