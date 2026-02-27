@@ -16,7 +16,9 @@ import {
   getAiScreenRunProgress,
   advanceCandidates,
   listResumesByStage,
-  exportStageToExcel
+  exportStageToExcel,
+  getFilteredCandidates,
+  withdrawApplication // NEW: Import withdraw application function
 } from '../controllers/resumeController.js';
 
 const router = Router();
@@ -121,8 +123,23 @@ router.get(
   exportStageToExcel
 );
 
+// Production Architecture: Dynamic Filtering Endpoint
+router.get(
+  '/job/:jobId/candidates',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('jobId').isMongoId(),
+  handleValidation,
+  getFilteredCandidates
+);
+
 router.get('/:id', authenticate, param('id').isMongoId(), handleValidation, getResume);
 router.get('/:id/download', authenticate, param('id').isMongoId(), handleValidation, downloadResume);
+
+// NEW: Withdraw application route (candidate only)
+router.delete('/:id/withdraw', authenticate, param('id').isMongoId(), handleValidation, withdrawApplication);
+
+// Legacy delete route (admin/recruiter only)
 router.delete('/:id', authenticate, param('id').isMongoId(), handleValidation, deleteResume);
 
 export default router;

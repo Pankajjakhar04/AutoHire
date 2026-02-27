@@ -1,42 +1,64 @@
-import SibApiV3Sdk from 'sib-api-v3-sdk';
+import nodemailer from 'nodemailer';
 
-const brevoApiKey = process.env.BREVO_API_KEY || process.env.SMTP_PASS;
-const brevoFrom  = process.env.BREVO_FROM    || process.env.SMTP_FROM;
+// Universal SMTP configuration for Render deployment
+const smtpHost = process.env.SMTP_HOST;
+const smtpPort = parseInt(process.env.SMTP_PORT) || 587;
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+const smtpFrom = process.env.SMTP_FROM;
 
-let _client = null;
+let _transporter = null;
 
-function getBrevoClient() {
-  if (!brevoApiKey || !brevoFrom) {
-    console.warn('[Email] Brevo not configured – set BREVO_API_KEY and BREVO_FROM env vars.');
+function getTransporter() {
+  if (_transporter) return _transporter;
+  
+  if (!smtpUser || !smtpPass || !smtpFrom) {
+    console.warn('[Email] SMTP not configured – set SMTP_USER, SMTP_PASS, and SMTP_FROM');
     return null;
   }
-  if (_client) return _client; // reuse instance
-  SibApiV3Sdk.ApiClient.instance.authentications['api-key'].apiKey = brevoApiKey;
-  _client = new SibApiV3Sdk.TransactionalEmailsApi();
-  return _client;
+
+  // Universal SMTP transporter that works on Render
+  _transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+    tls: {
+      rejectUnauthorized: false, // Critical for Render deployment
+    },
+    pool: true, // Connection pooling for better performance
+    maxConnections: 5,
+    maxMessages: 100,
+  });
+
+  return _transporter;
 }
 
 /* ─────────────────────────────────────────────
    Internal helper – send a single email
 ───────────────────────────────────────────── */
 async function sendEmail({ to, subject, html }) {
-  const client = getBrevoClient();
+  const transporter = getTransporter();
 
-  if (!client) {
+  if (!transporter) {
     console.log(`[Email][LOG] To: ${to} | Subject: ${subject}`);
     return { logged: true };
   }
 
   try {
-    const payload = {
-      sender:      { email: brevoFrom },
-      to:          [{ email: to }],
+    const mailOptions = {
+      from: smtpFrom,
+      to,
       subject,
-      htmlContent: html,
+      html,
     };
-    const data = await client.sendTransacEmail(payload);
-    console.log(`[Email] Sent → ${to} | messageId: ${data.messageId ?? JSON.stringify(data)}`);
-    return { sent: true, messageId: data.messageId ?? null };
+
+    const result = await transporter.sendMail(mailOptions);
+    console.log(`[Email] Sent → ${to} | messageId: ${result.messageId}`);
+    return { sent: true, messageId: result.messageId };
   } catch (err) {
     console.error(`[Email] Failed → ${to} |`, err.message);
     return { error: err.message };

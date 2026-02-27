@@ -1,6 +1,16 @@
 import { Router } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
-import { checkEligibility, createJob, deleteJob, getJob, listJobs, updateJob } from '../controllers/jobController.js';
+import {
+  checkEligibility,
+  createJob,
+  deleteJob,
+  getJob,
+  getFilteredCandidates,
+  initializeJobForML,
+  listJobs,
+  updateJob,
+  runAIScreening
+} from '../controllers/jobController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -21,7 +31,38 @@ router.get(
   listJobs
 );
 
-router.get('/:id', [param('id').isMongoId()], handleValidation, authenticate, getJob);
+router.get(
+  '/:id/initialize-ml',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('id').isMongoId(),
+  handleValidation,
+  initializeJobForML
+);
+
+// Dynamic candidate filtering by aiScore threshold — no ML re-run
+router.get(
+  '/:jobId/candidates',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('jobId').isMongoId(),
+  query('targetScore').optional().isNumeric(),
+  query('limit').optional().isNumeric(),
+  query('skip').optional().isNumeric(),
+  handleValidation,
+  getFilteredCandidates
+);
+
+router.get('/:id', authenticate, param('id').isMongoId(), handleValidation, getJob);
+
+router.post(
+  '/:jobId/run-ai-screening',
+  authenticate,
+  requireRole(['recruiterAdmin', 'hrManager']),
+  param('jobId').isMongoId(),
+  handleValidation,
+  runAIScreening
+);
 
 router.post(
   '/',

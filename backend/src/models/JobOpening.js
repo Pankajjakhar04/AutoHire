@@ -26,18 +26,39 @@ const eligibilityCriteriaSchema = new mongoose.Schema(
 
 const jobOpeningSchema = new mongoose.Schema(
   {
-    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    jobCode: { type: String, unique: true, sparse: true }, // Shorter 7-digit numeric ID
+    // Company and basic info
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    companyName: { type: String, required: true, trim: true }, // For ML integration
+    jobCode: { type: String, unique: true, sparse: true }, // 7-digit numeric ID
+    
+    // Job details (Production Architecture)
     title: { type: String, required: true, trim: true },
     description: { type: String, required: true },
     requiredSkills: [{ type: String, trim: true }],
     niceToHaveSkills: [{ type: String, trim: true }],
     experienceYears: { type: Number, min: 0 },
+    
+    // Eligibility criteria
     eligibilityCriteria: eligibilityCriteriaSchema,
+    
+    // Additional job info
     salaryRange: salaryRangeSchema,
     location: { type: String, trim: true },
+    
+    // Status and soft delete
     status: { type: String, enum: ['active', 'closed'], default: 'active' },
-    isDeleted: { type: Boolean, default: false }
+    isDeleted: { type: Boolean, default: false },
+    
+    // ML Integration (Production Architecture)
+    mlCompanyId: { type: String, default: null }, // ML server company ID
+    mlJobId: { type: String, default: null }, // ML server job ID
+    mlInitialized: { type: Boolean, default: false }, // Track ML initialization
+    mlInitializedAt: { type: Date },
+    
+    // Screening metadata
+    totalResumes: { type: Number, default: 0 },
+    screenedResumes: { type: Number, default: 0 },
+    lastScreenedAt: { type: Date }
   },
   { timestamps: true }
 );
@@ -60,7 +81,11 @@ jobOpeningSchema.pre('save', async function(next) {
   next();
 });
 
+// Indexes for performance
 jobOpeningSchema.index({ title: 'text', description: 'text', location: 'text' });
+jobOpeningSchema.index({ companyId: 1, status: 1 });
+jobOpeningSchema.index({ mlCompanyId: 1 });
+jobOpeningSchema.index({ mlJobId: 1 });
 
 const JobOpening = mongoose.model('JobOpening', jobOpeningSchema);
 

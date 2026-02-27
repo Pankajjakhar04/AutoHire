@@ -51,15 +51,20 @@ export async function register(req, res) {
   try {
     const { email, password, name, role = 'candidate', employeeId, companyName, highestQualificationDegree, specialization, cgpaOrPercentage, passoutYear } = req.body;
 
+    console.log(`[Registration] Attempt:`, { email, role, name });
+
     if (!email || !password) {
+      console.log(`[Registration] Failed: Missing email or password`);
       return res.status(400).json({ message: 'Email and password are required.' });
     }
     if (!USER_ROLES.includes(role)) {
+      console.log(`[Registration] Failed: Invalid role - ${role}`);
       return res.status(400).json({ message: 'Invalid role.' });
     }
 
     const existing = await User.findOne({ email: email.toLowerCase().trim() });
     if (existing) {
+      console.log(`[Registration] Failed: User already exists - ${email}`);
       return res.status(409).json({ message: 'User already exists.' });
     }
 
@@ -83,10 +88,13 @@ export async function register(req, res) {
       const timestamp = Date.now().toString(36).toUpperCase();
       const random = Math.random().toString(36).substring(2, 6).toUpperCase();
       userData.candidateId = `CAND-${timestamp}-${random}`;
+      console.log(`[Registration] Generated candidateId: ${userData.candidateId}`);
     }
 
-    const user = await User.create(userData);
+    console.log(`[Registration] Creating user with data:`, { ...userData, password: '[HIDDEN]' });
 
+    const user = await User.create(userData);
+    console.log(`[Registration] User created successfully:`, user._id);
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user);
@@ -95,9 +103,28 @@ export async function register(req, res) {
     await user.save();
 
     setRefreshCookie(res, refreshToken);
+    console.log(`[Registration] Success: User ${email} registered successfully`);
+    
     return res.status(201).json({ user, accessToken });
   } catch (err) {
-    console.error('Register error', err);
+    console.error('[Registration] Error details:', {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+      code: err.code
+    });
+    
+    // Handle specific MongoDB errors
+    if (err.code === 11000) {
+      const field = Object.keys(err.keyValue)[0];
+      return res.status(409).json({ message: `${field} already exists.` });
+    }
+    
+    if (err.name === 'ValidationError') {
+      const field = Object.keys(err.errors)[0];
+      return res.status(400).json({ message: `${field} is required or invalid.` });
+    }
+    
     return res.status(500).json({ message: 'Internal server error' });
   }
 }

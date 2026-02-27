@@ -1,315 +1,188 @@
-import dotenv from 'dotenv';
-
-// Load environment variables in dev (no-op in prod if already loaded)
+import axios from "axios";
+import dotenv from "dotenv";
 dotenv.config();
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+const ML_BASE_URL = process.env.ML_BASE_URL;
+const ML_API_KEY = process.env.ML_API_KEY;
 
-if (!GEMINI_API_KEY) {
-  // eslint-disable-next-line no-console
-  console.warn('[AI Screening] GEMINI_API_KEY not set – AI scoring will be disabled.');
-}
-
-/**
- * Build a compact but information-dense prompt for Gemini.
- * We send:
- * - Job metadata + requirements
- * - Parsed candidate profile fields
- * - Raw resume text (as plain text)
- *
- * Gemini returns a strictly structured JSON with the full scoring breakdown.
- */
-function buildPrompt(job, candidateProfile, resumeText) {
-  const jdSummary = [
-    `Title: ${job?.title || ''}`,
-    `Location: ${job?.location || ''}`,
-    `Experience (yrs): ${job?.experienceYears ?? 'N/A'}`,
-    `Required skills: ${(job?.requiredSkills || []).join(', ') || 'N/A'}`,
-    `Nice-to-have skills: ${(job?.niceToHaveSkills || []).join(', ') || 'N/A'}`
-  ].join('\n');
-
-  const candidateSummary = [
-    `Name: ${candidateProfile?.name || ''}`,
-    `Highest qualification: ${candidateProfile?.highestQualificationDegree || ''}`,
-    `Specialization: ${candidateProfile?.specialization || ''}`,
-    `CGPA/Percentage: ${candidateProfile?.cgpaOrPercentage || ''}`,
-    `Passout year: ${candidateProfile?.passoutYear || ''}`,
-    `Total experience (yrs, if known): ${candidateProfile?.totalExperienceYears || ''}`
-  ].join('\n');
-
-  return `
-You are an expert technical recruiter. Evaluate a candidate's resume against a specific job description.
-
-Follow this EXACT scoring framework. Total score = 100.
-Output MUST be pure JSON, no commentary.
-
-############################
-SCORING FRAMEWORK (100 points)
-############################
-
-1. Core Technical Skills Match (30 points)
-- Evaluate only relevant skills for this JD.
-- Consider: mandatory/core skills, tools, frameworks, languages, version/platform relevance.
-- Scoring guidelines:
-  * ~100% match with strong evidence => 30
-  * ~75% match => 22
-  * ~50% match => 15
-  * <50% => 5–10
-- If a clearly mandatory skill is missing entirely, set "redFlags.includes('MANDATORY_SKILL_MISSING')" = true.
-
-2. Experience Relevance (20 points)
-- Focus on RELEVANT experience, not total years.
-- Consider:
-  * Same/similar role
-  * Same/similar domain
-  * Seniority vs JD expectations
-- Scoring:
-  * Exact domain + required years => 20
-  * Slightly lower years but clearly relevant => 15
-  * Related domain only => 10
-  * Mostly irrelevant => 5
-
-3. Impact & Measurable Achievements (15 points)
-- Look for evidence: % improvement, revenue impact, cost savings, performance/scale metrics.
-- Strong quantified results across multiple bullet points => 15
-- Some metrics, somewhat concrete => 10
-- No real metrics / only generic statements => 5
-
-4. Problem-Solving & Complexity (10 points)
-- Look for:
-  * System design
-  * Scaling / high-traffic work
-  * Architecture decisions
-  * Performance optimization / debugging complex issues
-- High complexity and ownership => 9–10
-- Moderate complexity => 6–8
-- Mostly CRUD / basic tasks => 3–5
-
-5. Project Quality & Depth (10 points)
-- Check:
-  * Real-world/production projects
-  * Ownership of modules / services
-  * Clarity of architecture
-  * GitHub / live links if present
-- Production-grade, well-described projects => 9–10
-- Some reasonable academic/training + a bit of real work => 5–8
-- Only basic/academic/demo projects => 3–5
-
-6. Education & Academic Strength (5 points)
-- Tier-1 / strong university + relevant degree => up to 5
-- Strong CGPA (> 8.5 / 85%) => 4
-- Relevant degree but average academics => 3
-- Unrelated degree => 2
-- Keep weight low vs real performance.
-
-7. Communication & Resume Quality (5 points)
-- Structure, clarity, grammar, noise/buzzwords, length, signal-to-noise ratio.
-- Very clear, concise, professional => 5
-- Acceptable, minor issues => 3–4
-- Poorly structured / many errors => 1–2
-
-8. Cultural & Role Alignment (5 points)
-- Evidence of:
-  * Ownership / end-to-end responsibility
-  * Leadership / mentoring / collaboration
-  * Stability vs frequent short stints
-- Strong ownership + stability => 5
-- Mixed evidence => 3–4
-- Low evidence / job-hopping every 3–6 months => 1–2
-
-############################
-RED FLAGS (HARVARD-STYLE)
-############################
-If present, note them explicitly in "redFlags" with clear text. Examples:
-- No measurable achievements anywhere.
-- Fake buzzwords (AI, ML, Blockchain etc.) without any concrete project.
-- Extremely long skill lists with shallow evidence.
-- Job-hopping every 3–6 months.
-- Resume appears to copy-paste JD wording.
-Red flags should not FORCE score to 0, but they should influence category scores and final recommendation.
-
-############################
-FINAL OUTPUT FORMAT (STRICT JSON)
-############################
-Respond with ONLY valid JSON in this shape:
-{
-  "totalScore": number (0-100),
-  "fitLevel": "Strong Fit" | "Moderate Fit" | "Weak Fit" | "Not Recommended",
-  "categories": {
-    "coreTechnicalSkills": { "score": number, "comments": string },
-    "experienceRelevance": { "score": number, "comments": string },
-    "impactAchievements": { "score": number, "comments": string },
-    "problemSolvingComplexity": { "score": number, "comments": string },
-    "projectQualityDepth": { "score": number, "comments": string },
-    "educationAcademics": { "score": number, "comments": string },
-    "communicationResumeQuality": { "score": number, "comments": string },
-    "culturalRoleAlignment": { "score": number, "comments": string }
-  },
-  "jdAlignmentSummary": string,
-  "strongSignals": string[],
-  "concerns": string[],
-  "redFlags": string[]
-}
-
-Fit level mapping:
-- totalScore >= 75 => "Strong Fit"
-- 60–74 => "Moderate Fit"
-- 45–59 => "Weak Fit"
-- < 45 => "Not Recommended"
-
-Make sure the sum of category scores is close to totalScore (allow small rounding differences).
-
-############################
-CONTEXT: JOB DESCRIPTION
-############################
-${jdSummary}
-
-############################
-CONTEXT: CANDIDATE PROFILE (STRUCTURED)
-############################
-${candidateSummary}
-
-############################
-CONTEXT: FULL RESUME TEXT (RAW)
-############################
-${resumeText || '[NO RESUME TEXT PROVIDED]'}
-`;
-}
-
-async function callGemini(prompt) {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not configured');
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    GEMINI_MODEL
-  )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-
-  const payload = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: prompt }]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.1,
-      topK: 32,
-      topP: 0.8,
-      maxOutputTokens: 4096,
-      responseMimeType: 'application/json'
-    }
-  };
-
-  console.log(`[AI Screening] Calling Gemini API (model: ${GEMINI_MODEL})...`);
-  
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error('[AI Screening] Gemini API HTTP error:', res.status, text);
-    throw new Error(`Gemini API error: ${res.status} ${res.statusText} – ${text}`);
-  }
-
-  const data = await res.json();
-  
-  // Check for blocked content or safety issues
-  if (data?.promptFeedback?.blockReason) {
-    console.error('[AI Screening] Gemini blocked prompt:', data.promptFeedback);
-    throw new Error(`Gemini blocked request: ${data.promptFeedback.blockReason}`);
-  }
-  
-  const candidates = data?.candidates || [];
-  
-  // Check if response was filtered
-  if (candidates[0]?.finishReason === 'SAFETY') {
-    console.error('[AI Screening] Gemini response filtered for safety');
-    throw new Error('Gemini response filtered for safety');
-  }
-  
-  const content = candidates[0]?.content?.parts?.[0]?.text || '';
-  if (!content) {
-    console.error('[AI Screening] Empty Gemini response. Full response:', JSON.stringify(data));
-    throw new Error('Gemini response missing text content');
-  }
-
-  console.log(`[AI Screening] Gemini response received (${content.length} chars)`);
-
-  // Response should be pure JSON, but be defensive in case of leading noise
-  const firstBrace = content.indexOf('{');
-  const lastBrace = content.lastIndexOf('}');
-  const jsonText =
-    firstBrace !== -1 && lastBrace !== -1 ? content.slice(firstBrace, lastBrace + 1) : content;
-
-  try {
-    const parsed = JSON.parse(jsonText);
-    console.log(`[AI Screening] Parsed score: ${parsed.totalScore}, fit: ${parsed.fitLevel}`);
-    return parsed;
-  } catch (err) {
-    console.error('[AI Screening] Failed to parse Gemini JSON:', err.message);
-    console.error('[AI Screening] Raw content:', content.substring(0, 500));
-    throw new Error('Failed to parse Gemini response as JSON');
-  }
-}
-
-/**
- * Main entry point for AI screening.
- *
- * @param {Object} params
- * @param {import('../models/JobOpening.js').default} params.job - Mongoose JobOpening document or plain object
- * @param {Object} params.candidateProfile - User profile (name, highestQualificationDegree, specialization, etc.)
- * @param {string} params.resumeText - Full plain-text contents of the candidate's resume
- *
- * @returns {Promise<{
- *   totalScore: number;
- *   fitLevel: string;
- *   categories: {
- *     coreTechnicalSkills: { score: number; comments: string };
- *     experienceRelevance: { score: number; comments: string };
- *     impactAchievements: { score: number; comments: string };
- *     problemSolvingComplexity: { score: number; comments: string };
- *     projectQualityDepth: { score: number; comments: string };
- *     educationAcademics: { score: number; comments: string };
- *     communicationResumeQuality: { score: number; comments: string };
- *     culturalRoleAlignment: { score: number; comments: string };
- *   };
- *   jdAlignmentSummary: string;
- *   strongSignals: string[];
- *   concerns: string[];
- *   redFlags: string[];
- * }>}
- */
-export async function scoreResumeWithGemini({ job, candidateProfile, resumeText }) {
-  const prompt = buildPrompt(job, candidateProfile, resumeText);
-  const result = await callGemini(prompt);
-
-  // Basic normalization & fallback handling
-  const totalScore = Number.isFinite(result.totalScore) ? Number(result.totalScore) : 0;
-  let fitLevel = result.fitLevel || 'Not Recommended';
-  if (totalScore >= 75) fitLevel = 'Strong Fit';
-  else if (totalScore >= 60) fitLevel = 'Moderate Fit';
-  else if (totalScore >= 45) fitLevel = 'Weak Fit';
-  else fitLevel = 'Not Recommended';
-
+function getHeaders() {
   return {
-    totalScore,
-    fitLevel,
-    categories: result.categories || {},
-    jdAlignmentSummary: result.jdAlignmentSummary || '',
-    strongSignals: Array.isArray(result.strongSignals) ? result.strongSignals : [],
-    concerns: Array.isArray(result.concerns) ? result.concerns : [],
-    redFlags: Array.isArray(result.redFlags) ? result.redFlags : []
+    "x-api-key": ML_API_KEY
   };
+}
+
+function buildFullJobContext(job) {
+  return `
+JOB TITLE:
+${job.title || ""}
+
+OVERVIEW:
+${job.description || ""}
+
+ELIGIBILITY CRITERIA:
+Minimum Education: ${job.minimumEducation || ""}
+Minimum Experience: ${job.minimumExperience || ""}
+Specialization / Stream: ${job.specialization || ""}
+Academic Qualification: ${job.academicQualification || ""}
+
+REQUIRED SKILLS:
+${Array.isArray(job.requiredSkills) ? job.requiredSkills.join(", ") : job.requiredSkills || ""}
+
+NICE TO HAVE:
+${Array.isArray(job.niceToHaveSkills) ? job.niceToHaveSkills.join(", ") : job.niceToHaveSkills || ""}
+
+LOCATION:
+${job.location || ""}`;
+}
+
+/**
+ * Parse skills from job object into a clean lowercase array.
+ * Handles both array and comma-separated string formats.
+ */
+function parseSkillsList(skills) {
+  if (!skills) return [];
+  if (Array.isArray(skills)) {
+    return skills.map(s => s.trim().toLowerCase()).filter(Boolean);
+  }
+  if (typeof skills === "string") {
+    return skills.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  }
+  return [];
+}
+
+export async function initializeMLJob({ job }) {
+  try {
+    console.log(`[ML Init] Starting ML job initialization for job: ${job.title}`);
+    console.log(`[ML Init] ML_BASE_URL: ${ML_BASE_URL}`);
+    console.log(`[ML Init] Company Name: ${job.companyName}`);
+
+    const headers = getHeaders();
+    const fullJobContext = buildFullJobContext(job);
+
+    // Parse required and nice-to-have skills into clean arrays
+    const requiredSkills = parseSkillsList(job.requiredSkills);
+    const niceToHaveSkills = parseSkillsList(job.niceToHaveSkills);
+
+    console.log(`[ML Init] Required skills: ${requiredSkills}`);
+    console.log(`[ML Init] Nice to have: ${niceToHaveSkills}`);
+
+    console.log(`[ML Init] Creating company...`);
+    const companyRes = await axios.post(
+      `${ML_BASE_URL}/company`,
+      { name: job.companyName || job.company || job.organizationName || job.title || "Default Company" },
+      {
+        headers,
+        timeout: 10000
+      }
+    );
+
+    const mlCompanyId = companyRes.data.company_id;
+    console.log(`[ML Init] Company created with ID: ${mlCompanyId}`);
+
+    console.log(`[ML Init] Creating job...`);
+    const jobRes = await axios.post(
+      `${ML_BASE_URL}/jobs`,
+      {
+        company_id: mlCompanyId,
+        title: job.title,
+        description: fullJobContext,
+        required_skills: requiredSkills,     // FIX: pass structured skills list
+        nice_to_have: niceToHaveSkills        // FIX: pass nice-to-have list
+      },
+      {
+        headers,
+        timeout: 10000
+      }
+    );
+
+    const mlJobId = jobRes.data.job_id;
+    console.log(`[ML Init] Job created with ID: ${mlJobId}`);
+
+    return {
+      mlCompanyId,
+      mlJobId
+    };
+  } catch (error) {
+    console.error(`[ML Init] Error details:`, {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      url: `${ML_BASE_URL}/company`
+    });
+
+    if (error.code === "ECONNREFUSED") {
+      throw new Error(`ML service not reachable at ${ML_BASE_URL}`);
+    }
+
+    if (error.code === "ETIMEDOUT") {
+      throw new Error(`ML service timeout at ${ML_BASE_URL}`);
+    }
+
+    if (error.response?.status === 401) {
+      throw new Error(`Invalid ML API key`);
+    }
+
+    throw new Error(`ML initialization failed: ${error.message}`);
+  }
+}
+
+/**
+ * Add resume to ML system.
+ * Passes resume_id (your DB ID) so ML results can be mapped back to candidates.
+ */
+export async function addResumeToML({
+  mlCompanyId,
+  mlJobId,
+  resumeText,
+  resumeId  // FIX: now passed to ML so scores can be matched back by resume_id
+}) {
+  try {
+    const headers = getHeaders();
+
+    const response = await axios.post(
+      `${ML_BASE_URL}/jobs/${mlCompanyId}/${mlJobId}/resume`,
+      {
+        resume_text: resumeText,
+        resume_id: resumeId   // FIX: send resume_id so ML tracks it
+      },
+      { headers }
+    );
+
+    console.log(`[AI ML] Resume ${resumeId} added to ML system with resume_id tracking`);
+    return { success: true, mlResponse: response.data };
+  } catch (err) {
+    console.error("[AI ML] addResumeToML error:", err.message);
+    if (err.response?.data) {
+      console.error("[AI ML] ML Error details:", err.response.data);
+    }
+    throw new Error("Failed to add resume to ML");
+  }
+}
+
+/**
+ * Clear all resumes for a job from ML database.
+ * Call this before re-running AI screening to remove stale data.
+ */
+export async function clearMLJobResumes({ mlCompanyId, mlJobId }) {
+  try {
+    const headers = getHeaders();
+    const response = await axios.delete(
+      `${ML_BASE_URL}/jobs/${mlCompanyId}/${mlJobId}/resumes`,
+      { headers, timeout: 10000 }
+    );
+    console.log(`[AI ML] Cleared ML resumes for job ${mlJobId}:`, response.data);
+    return response.data;
+  } catch (err) {
+    console.warn(`[AI ML] clearMLJobResumes failed (non-fatal):`, err.message);
+    // Non-fatal — log and continue
+    return null;
+  }
 }
 
 export default {
-  scoreResumeWithGemini
+  initializeMLJob,
+  addResumeToML,
+  clearMLJobResumes
 };
-

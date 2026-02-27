@@ -56,7 +56,16 @@ export async function extractResumeTextFromBuffer({ buffer, mimeType, originalNa
     }
     try {
       const out = await pdfParse(buffer);
-      const text = clipText(out?.text || '');
+      let text = clipText(out?.text || '');
+      
+      // If no text extracted, it might be a scanned PDF
+      if (!text || text.length < 50) {
+        console.warn('[ResumeText] PDF appears to be scanned/image-based, no text extracted');
+        console.warn('[ResumeText] Consider using OCR for scanned PDFs');
+        // For now, return empty but log the issue
+        text = '';
+      }
+      
       console.log(`[ResumeText] PDF extracted: ${text.length} chars`);
       return text;
     } catch (err) {

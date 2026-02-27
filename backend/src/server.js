@@ -9,10 +9,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRoutes from './routes/index.js';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load .env from parent directory
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+// Debug: Check if .env is loaded
+console.log("[Server] Environment check:");
+console.log("[Server] ML_BASE_URL:", process.env.ML_BASE_URL || "undefined");
+console.log("[Server] ML_API_KEY:", process.env.ML_API_KEY ? "***" : "undefined");
 
 // Ensure required directories exist
 const uploadsDir = path.resolve(__dirname, '../uploads');

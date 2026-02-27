@@ -1,35 +1,67 @@
-import crypto from 'crypto';
+import AIScreenRun from "../models/AIScreenRun.js";
 
-const runs = new Map();
-
-export function createRun({ jobId, total }) {
-  const runId = crypto.randomUUID();
-  const run = {
-    runId,
+/**
+ * Create new screening run
+ */
+export async function createRun({ jobId, total }) {
+  const run = await AIScreenRun.create({
     jobId,
     total: Number(total) || 0,
     processed: 0,
     screenedIn: 0,
     screenedOut: 0,
-    startedAt: Date.now(),
-    updatedAt: Date.now(),
-    done: false,
-    error: null
-  };
-  runs.set(runId, run);
+    status: "running"
+  });
+
   return run;
 }
 
-export function updateRun(runId, patch) {
-  const run = runs.get(runId);
-  if (!run) return null;
-  Object.assign(run, patch || {});
-  run.updatedAt = Date.now();
-  runs.set(runId, run);
+/**
+ * Update run progress
+ */
+export async function updateRun(runId, patch = {}) {
+  const run = await AIScreenRun.findByIdAndUpdate(
+    runId,
+    { ...patch },
+    { new: true }
+  );
+
   return run;
 }
 
-export function getRun(runId) {
-  return runs.get(runId) || null;
+/**
+ * Get run status
+ */
+export async function getRun(runId) {
+  return AIScreenRun.findById(runId);
 }
 
+/**
+ * Mark run completed
+ */
+export async function markRunCompleted(runId) {
+  return AIScreenRun.findByIdAndUpdate(
+    runId,
+    { status: "completed" },
+    { new: true }
+  );
+}
+
+/**
+ * Mark run failed
+ */
+export async function markRunFailed(runId, errorMessage) {
+  return AIScreenRun.findByIdAndUpdate(
+    runId,
+    { status: "failed", error: errorMessage },
+    { new: true }
+  );
+}
+
+export default {
+  createRun,
+  updateRun,
+  getRun,
+  markRunCompleted,
+  markRunFailed
+};
