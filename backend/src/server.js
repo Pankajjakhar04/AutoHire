@@ -12,8 +12,12 @@ import apiRoutes from './routes/index.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env from parent directory
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+// Load environment files based on NODE_ENV
+const isProductionEnv = process.env.NODE_ENV === 'production';
+const envFile = isProductionEnv ? '.env.production' : '.env';
+dotenv.config({ path: path.resolve(__dirname, `../${envFile}`) });
+
+console.log(`[Server] Loading environment from: ${envFile}`);
 
 // Debug: Check if .env is loaded
 console.log("[Server] Environment check:");
