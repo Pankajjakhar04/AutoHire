@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import User, { USER_ROLES } from '../models/User.js';
+import User from '../models/User.js';
+import { sendWelcomeEmail } from '../services/email.js';
 
 const accessSecret = process.env.JWT_ACCESS_SECRET || 'dev_access_secret';
 const refreshSecret = process.env.JWT_REFRESH_SECRET || 'dev_refresh_secret';
@@ -104,6 +105,20 @@ export async function register(req, res) {
 
     setRefreshCookie(res, refreshToken);
     console.log(`[Registration] Success: User ${email} registered successfully`);
+    
+    // Send welcome email
+    try {
+      const emailResult = await sendWelcomeEmail({
+        to: email,
+        userName: name,
+        role: role,
+        userId: user._id
+      });
+      console.log('[Registration] Welcome email sent:', emailResult);
+    } catch (emailErr) {
+      console.error('[Registration] Failed to send welcome email:', emailErr.message);
+      // Don't fail registration if email fails
+    }
     
     return res.status(201).json({ user, accessToken });
   } catch (err) {

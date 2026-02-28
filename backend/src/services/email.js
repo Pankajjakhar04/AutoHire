@@ -1,37 +1,44 @@
 import nodemailer from 'nodemailer';
 
-// Universal SMTP configuration for Render deployment
-const smtpHost = process.env.SMTP_HOST;
-const smtpPort = parseInt(process.env.SMTP_PORT) || 587;
-const smtpUser = process.env.SMTP_USER;
-const smtpPass = process.env.SMTP_PASS;
-const smtpFrom = process.env.SMTP_FROM;
+// ─── Gmail SMTP Configuration ────────────────────────────────────────────────
+// Uses Gmail App Password (works on Render, Vercel, Railway, etc.)
+// Set these in your .env file (see README below)
+
+const gmailUser = process.env.GMAIL_USER;       // your Gmail address
+const gmailPass = process.env.GMAIL_APP_PASS;   // Gmail App Password (16-char)
+const fromName  = process.env.FROM_NAME || 'Autohire-Pro Recruitment';
 
 let _transporter = null;
 
 function getTransporter() {
   if (_transporter) return _transporter;
-  
-  if (!smtpUser || !smtpPass || !smtpFrom) {
-    console.warn('[Email] SMTP not configured – set SMTP_USER, SMTP_PASS, and SMTP_FROM');
+
+  if (!gmailUser || !gmailPass) {
+    console.warn(
+      '[Email] Gmail not configured – set GMAIL_USER and GMAIL_APP_PASS in your .env'
+    );
     return null;
   }
 
-  // Universal SMTP transporter that works on Render
   _transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465,
+    service: 'gmail',           // Nodemailer knows Gmail's SMTP settings automatically
     auth: {
-      user: smtpUser,
-      pass: smtpPass,
+      user: gmailUser,
+      pass: gmailPass,          // This is the App Password, NOT your Gmail login password
     },
-    tls: {
-      rejectUnauthorized: false, // Critical for Render deployment
-    },
-    pool: true, // Connection pooling for better performance
+    pool: true,                 // Reuse connections (important for Render cold starts)
     maxConnections: 5,
     maxMessages: 100,
+  });
+
+  // Verify connection on startup (optional but helpful for debugging)
+  _transporter.verify((err) => {
+    if (err) {
+      console.error('[Email] Gmail SMTP connection failed:', err.message);
+      _transporter = null;      // Reset so it retries next time
+    } else {
+      console.log('[Email] Gmail SMTP ready ✓');
+    }
   });
 
   return _transporter;
@@ -44,19 +51,19 @@ async function sendEmail({ to, subject, html }) {
   const transporter = getTransporter();
 
   if (!transporter) {
-    console.log(`[Email][LOG] To: ${to} | Subject: ${subject}`);
+    // Fallback: just log so your app doesn't crash if email isn't configured
+    console.log(`[Email][LOG – not sent] To: ${to} | Subject: ${subject}`);
     return { logged: true };
   }
 
   try {
-    const mailOptions = {
-      from: smtpFrom,
+    const result = await transporter.sendMail({
+      from: `"${fromName}" <${gmailUser}>`,
       to,
       subject,
       html,
-    };
+    });
 
-    const result = await transporter.sendMail(mailOptions);
     console.log(`[Email] Sent → ${to} | messageId: ${result.messageId}`);
     return { sent: true, messageId: result.messageId };
   } catch (err) {
@@ -71,11 +78,15 @@ async function sendEmail({ to, subject, html }) {
 function emailWrapper(bodyHtml) {
   return `
     <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:auto;
-                padding:24px;border:1px solid #E5E7EB;border-radius:8px;">
-      <h2 style="color:#0A66C2;margin-bottom:4px;">AutoHire Recruitment</h2>
+                padding:24px;border:1px solid #E5E7EB;border-radius:8px;background:#ffffff;">
+      <h2 style="color:#0A66C2;margin-bottom:4px;">Autohire-Pro Recruitment</h2>
       <hr style="border:none;border-top:1px solid #E5E7EB;margin:12px 0;" />
       ${bodyHtml}
-      <p style="margin-top:20px;">Best regards,<br/><strong>AutoHire Recruitment Team</strong></p>
+      <p style="margin-top:20px;">Best regards,<br/><strong>Autohire-Pro Recruitment Team</strong></p>
+      <hr style="border:none;border-top:1px solid #E5E7EB;margin:20px 0 8px;" />
+      <p style="font-size:0.75rem;color:#9CA3AF;text-align:center;">
+        This is an automated message from Autohire-Pro. Please do not reply to this email.
+      </p>
     </div>`;
 }
 
@@ -92,7 +103,7 @@ const STAGE_LABELS = {
 export async function sendStageEmail({ to, candidateName, jobTitle, stage }) {
   const stageLabel = STAGE_LABELS[stage] ?? stage;
 
-  const subject = `AutoHire – You've been shortlisted for ${stageLabel}!`;
+  const subject = `Autohire-Pro – You've been shortlisted for ${stageLabel}!`;
   const html = emailWrapper(`
     <p>Dear <strong>${candidateName || 'Candidate'}</strong>,</p>
     <p>Congratulations! You have been <strong>shortlisted</strong> and advanced to the
@@ -107,7 +118,7 @@ export async function sendStageEmail({ to, candidateName, jobTitle, stage }) {
 }
 
 /* ─────────────────────────────────────────────
-   2. Batch stage emails  (non-blocking)
+   2. Batch stage emails (non-blocking, parallel)
 ───────────────────────────────────────────── */
 export async function sendBatchStageEmails(candidates, jobTitle, stage) {
   const results = await Promise.allSettled(
@@ -126,7 +137,7 @@ export async function sendBatchStageEmails(candidates, jobTitle, stage) {
    3. Application confirmation email
 ───────────────────────────────────────────── */
 export async function sendApplicationConfirmation({ to, candidateName, jobTitle, jobId }) {
-  const subject = `AutoHire – Application Received for ${jobTitle}`;
+  const subject = `Autohire-Pro – Application Received for ${jobTitle}`;
   const html = emailWrapper(`
     <p>Dear <strong>${candidateName || 'Candidate'}</strong>,</p>
     <p>Thank you for your interest! We have successfully received your application for:</p>
@@ -137,6 +148,58 @@ export async function sendApplicationConfirmation({ to, candidateName, jobTitle,
        our requirements.</p>
     <p>Due to the high volume of applications, this may take some time. We appreciate
        your patience.</p>
+  `);
+
+  return sendEmail({ to, subject, html });
+}
+
+/* ─────────────────────────────────────────────
+   5. Welcome email for new registrations
+──────────────────────────────────────────── */
+export async function sendWelcomeEmail({ to, userName, role, userId }) {
+  const subject = `Autohire-Pro – Welcome to the platform!`;
+  const html = emailWrapper(`
+    <p>Dear <strong>${userName || 'New User'}</strong>,</p>
+    <p>Welcome to <strong>Autohire-Pro</strong>! We're excited to have you join our recruitment platform.</p>
+    <p style="font-size:1.1rem;font-weight:600;color:#1F2937;padding:8px 12px;
+              background:#F3F4F6;border-radius:6px;">
+      Account Type: ${role.charAt(0).toUpperCase() + role.slice(1)}
+    </p>
+    <p>Your account has been successfully created and you can now:
+    ${role === 'candidate' ? `
+    <ul style="margin:16px 0;padding-left:20px;">
+      <li>Browse and apply for job openings</li>
+      <li>Upload and manage your resume</li>
+      <li>Track your application status</li>
+      <li>Receive updates on your applications</li>
+    </ul>` : `
+    <ul style="margin:16px 0;padding-left:20px;">
+      <li>Post job openings and manage listings</li>
+      <li>Review and screen candidate applications</li>
+      <li>Conduct AI-powered resume screening</li>
+      <li>Manage the recruitment pipeline</li>
+    </ul>`}
+    <p>If you have any questions or need assistance, please don't hesitate to reach out to our support team.</p>
+    <p>Thank you for choosing Autohire-Pro for your recruitment needs!</p>
+  `);
+
+  return sendEmail({ to, subject, html });
+}
+
+/* ─────────────────────────────────────────────
+   4. Rejection email  (bonus – often needed)
+───────────────────────────────────────────── */
+export async function sendRejectionEmail({ to, candidateName, jobTitle }) {
+  const subject = `Autohire-Pro – Update on your application for ${jobTitle}`;
+  const html = emailWrapper(`
+    <p>Dear <strong>${candidateName || 'Candidate'}</strong>,</p>
+    <p>Thank you for your time and interest in the position:</p>
+    <p style="font-size:1.1rem;font-weight:600;color:#1F2937;padding:8px 12px;
+              background:#F3F4F6;border-radius:6px;">${jobTitle}</p>
+    <p>After careful consideration, we have decided to move forward with other candidates
+       whose profiles more closely match our current requirements.</p>
+    <p>We genuinely appreciate your effort and encourage you to apply for future openings
+       that match your skills. We wish you all the best in your job search.</p>
   `);
 
   return sendEmail({ to, subject, html });
