@@ -19,6 +19,8 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 console.log("[Server] Environment check:");
 console.log("[Server] ML_BASE_URL:", process.env.ML_BASE_URL || "undefined");
 console.log("[Server] ML_API_KEY:", process.env.ML_API_KEY ? "***" : "undefined");
+console.log("[Server] GMAIL_USER:", process.env.GMAIL_USER || "undefined");
+console.log("[Server] GMAIL_APP_PASS:", process.env.GMAIL_APP_PASS ? "***" : "undefined");
 
 // Ensure required directories exist
 const uploadsDir = path.resolve(__dirname, '../uploads');

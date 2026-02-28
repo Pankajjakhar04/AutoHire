@@ -3,6 +3,8 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { sendWelcomeEmail } from '../services/email.js';
 
+const USER_ROLES = ['candidate', 'hrManager', 'recruiterAdmin'];
+
 const accessSecret = process.env.JWT_ACCESS_SECRET || 'dev_access_secret';
 const refreshSecret = process.env.JWT_REFRESH_SECRET || 'dev_refresh_secret';
 const accessTtl = process.env.ACCESS_TOKEN_TTL || '15m';

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import '../styles/auth.css';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -62,34 +63,47 @@ export default function Register() {
   };
 
   return (
-    <div className="auth-shell">
+    <div className="auth-container">
+      <div className="auth-shell register-shell">
       <h1>Create account</h1>
-      <form onSubmit={handleSubmit} className="auth-form">
+      <form onSubmit={handleSubmit} className="auth-form register-form">
         <div className="role-toggle" aria-label="Select role">
           {roles.map((r) => (
             <button
               key={r.value}
               type="button"
               className={role === r.value ? 'role-btn active' : 'role-btn'}
-              onClick={() => setRole(r.value)}
+              onClick={(e) => {
+                setRole(r.value);
+                // Ripple bubble effect
+                const btn = e.currentTarget;
+                const existing = btn.querySelector('.bubble-ripple');
+                if (existing) existing.remove();
+                const ripple = document.createElement('span');
+                ripple.className = 'bubble-ripple';
+                btn.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 600);
+              }}
             >
               {r.label}
             </button>
           ))}
         </div>
 
-        <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label>
-          Email
-          <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
-        </label>
-        <label>
-          Password
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required minLength={6} />
-        </label>
+        <div className="form-row">
+          <label>
+            Name
+            <input value={name} onChange={(e) => setName(e.target.value)} required />
+          </label>
+          <label>
+            Email
+            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
+          </label>
+          <label>
+            Password
+            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required minLength={6} />
+          </label>
+        </div>
         
         {(role === 'hrManager' || role === 'recruiterAdmin') && (
           <>
@@ -124,10 +138,11 @@ export default function Register() {
             </label>
           </>
         )}
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={loading}>{loading ? 'Creating...' : 'Create account'}</button>
+        {error && <p className="error full-width">{error}</p>}
+        <button type="submit" disabled={loading} className="full-width">{loading ? 'Creating...' : 'Create account'}</button>
       </form>
       <p className="muted">Already have an account? <Link to="/login">Sign in</Link></p>
+      </div>
     </div>
   );
 }

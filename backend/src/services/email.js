@@ -4,14 +4,24 @@ import nodemailer from 'nodemailer';
 // Uses Gmail App Password (works on Render, Vercel, Railway, etc.)
 // Set these in your .env file (see README below)
 
-const gmailUser = process.env.GMAIL_USER;       // your Gmail address
-const gmailPass = process.env.GMAIL_APP_PASS;   // Gmail App Password (16-char)
-const fromName  = process.env.FROM_NAME || 'Autohire-Pro Recruitment';
+// Get environment variables at runtime, not module load time
+const getGmailConfig = () => ({
+  gmailUser: process.env.GMAIL_USER,
+  gmailPass: process.env.GMAIL_APP_PASS,
+  fromName: process.env.FROM_NAME || 'Autohire-Pro Recruitment'
+});
 
 let _transporter = null;
 
 function getTransporter() {
   if (_transporter) return _transporter;
+
+  // Debug: Check environment variables at runtime
+  const { gmailUser, gmailPass, fromName } = getGmailConfig();
+  console.log('[Email] Debug - GMAIL_USER:', gmailUser || 'undefined');
+  console.log('[Email] Debug - GMAIL_APP_PASS:', gmailPass ? '***' : 'undefined');
+  console.log('[Email] Debug - GMAIL_USER:', process.env.GMAIL_USER || 'undefined');
+  console.log('[Email] Debug - GMAIL_APP_PASS:', process.env.GMAIL_APP_PASS ? '***' : 'undefined');
 
   if (!gmailUser || !gmailPass) {
     console.warn(
@@ -57,6 +67,7 @@ async function sendEmail({ to, subject, html }) {
   }
 
   try {
+    const { gmailUser, gmailPass, fromName } = getGmailConfig();
     const result = await transporter.sendMail({
       from: `"${fromName}" <${gmailUser}>`,
       to,

@@ -9,16 +9,15 @@
 }
 
 .auth-shell {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
+  background: #ffffff;
+  backdrop-filter: blur(20px);
+  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   padding: 2.5rem;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.2);
   max-width: 400px;
   width: 100%;
-  margin: 0 auto;
-  animation: slideUp 0.5s ease-out;
+  animation: slideUp 0.6s ease-out;
 }
 
 .auth-shell h1 {
@@ -61,7 +60,7 @@
   background: rgba(255, 255, 255, 1);
 }
 
-.auth-form button {
+.auth-form button:not(.role-btn) {
   padding: 0.875rem 1.5rem;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -74,12 +73,12 @@
   margin-top: 1rem;
 }
 
-.auth-form button:hover:not(:disabled) {
+.auth-form button:not(.role-btn):hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 10px 20px -5px rgba(102, 126, 234, 0.4);
 }
 
-.auth-form button:disabled {
+.auth-form button:not(.role-btn):disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
@@ -112,6 +111,161 @@
   text-decoration: underline;
 }
 
+/* Role toggle buttons */
+.role-toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  background: transparent;
+  padding: 3px;
+  border-radius: 10px;
+}
+
+.role-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #d1d5db;
+  border-radius: 4px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.role-btn:hover:not(.active) {
+  background: #e5e7eb;
+  color: #374151;
+  border-color: #9ca3af;
+}
+
+.role-btn.active {
+  background: linear-gradient(135deg, #4f7df3, #7c5cbf);
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+  border: 2px solid transparent;
+  transform: scale(1.02);
+  animation: bubbleSelect 0.5s ease-out;
+}
+
+/* Floating bubbles inside active button */
+.role-btn.active::before,
+.role-btn.active::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  animation: floatBubble 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.role-btn.active::before {
+  width: 18px;
+  height: 18px;
+  bottom: -6px;
+  left: 15%;
+  animation-delay: 0s;
+  animation-duration: 1.6s;
+}
+
+.role-btn.active::after {
+  width: 12px;
+  height: 12px;
+  bottom: -6px;
+  left: 55%;
+  animation-delay: 0.4s;
+  animation-duration: 2s;
+}
+
+/* Ripple burst on click */
+.role-btn .bubble-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  transform: scale(0);
+  animation: rippleBurst 0.6s ease-out forwards;
+  pointer-events: none;
+  width: 80px;
+  height: 80px;
+  top: 50%;
+  left: 50%;
+  margin-top: -40px;
+  margin-left: -40px;
+}
+
+/* Keyframes */
+@keyframes bubbleSelect {
+  0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(79, 125, 243, 0.5); }
+  40%  { transform: scale(1.06); box-shadow: 0 0 0 8px rgba(79, 125, 243, 0.15); }
+  70%  { transform: scale(0.98); }
+  100% { transform: scale(1.02); box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3); }
+}
+
+@keyframes floatBubble {
+  0%   { transform: translateY(0) scale(1); opacity: 0.7; }
+  50%  { transform: translateY(-22px) scale(1.1); opacity: 0.4; }
+  100% { transform: translateY(-44px) scale(0.6); opacity: 0; }
+}
+
+@keyframes rippleBurst {
+  0%   { transform: scale(0); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+/* Register specific styles */
+.register-shell {
+  max-width: 700px;
+  width: 100%;
+  padding: 20px;
+  background: #ffffff;
+}
+
+/* Grid layout for register form */
+.register-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.register-form .role-toggle {
+  grid-column: 1 / -1;
+}
+
+.register-form label {
+  display: flex;
+  flex-direction: column;
+}
+
+.register-form .full-width {
+  grid-column: 1 / -1;
+}
+
+/* Form row for Name, Email, Password */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
+.register-form input {
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.register-form input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
 /* Animation */
 @keyframes slideUp {
   from {
@@ -131,8 +285,32 @@
   }
   
   .auth-shell {
-    padding: 2rem;
-    margin: 0 1rem;
+    padding: 20px;
+  }
+  
+  .register-shell {
+    padding: 16px;
+    max-width: 650px;
+  }
+  
+  .register-form {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  
+  .register-form input {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  
+  .role-btn {
+    padding: 6px 10px;
+    font-size: 11px;
   }
   
   .auth-shell h1 {
