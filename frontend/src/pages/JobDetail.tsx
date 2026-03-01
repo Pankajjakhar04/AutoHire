@@ -367,13 +367,18 @@ export default function JobDetail() {
             {isCandidate && eligibilityResult && eligibilityResult.eligible && (
               <p className="success" style={{ marginTop: '0.25rem' }}>You appear eligible based on the criteria provided.</p>
             )}
-            {isCandidate && (
+            {isCandidate && resumes.length === 0 && (
               <div className="resume-upload">
                 <input type="file" accept=".pdf,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
                 <button onClick={handleUpload}>Apply</button>
                 {uploadError && <p className="error">{uploadError}</p>}
                 {uploadSuccess && <p className="success">{uploadSuccess}</p>}
               </div>
+            )}
+            {isCandidate && resumes.length > 0 && (
+              <p className="success" style={{ marginTop: '0.25rem', fontWeight: 600 }}>
+                ✓ You have already applied for this position.
+              </p>
             )}
             {resumeLoading ? (
               <p className="muted">Loading resumes...</p>

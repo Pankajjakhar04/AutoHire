@@ -13,6 +13,7 @@ export type Job = {
   jobCode?: string;
   title: string;
   description: string;
+  companyName?: string;
   requiredSkills?: string[];
   niceToHaveSkills?: string[];
   experienceYears?: number;

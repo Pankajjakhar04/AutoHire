@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState, useTransition } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { checkJobEligibility, deleteJob, fetchJobs, Job, type EligibilityCheckResult } from '../services/jobs';
+import { listMyResumes, uploadResume } from '../services/resumes';
 
 const specializationOptions = [
   'Computer Science',
@@ -59,8 +60,30 @@ export default function JobsList() {
   const [qualificationOther, setQualificationOther] = useState(false);
   const [customCriteriaAccepted, setCustomCriteriaAccepted] = useState<number[]>([]);
 
+  // Apply modal state
+  const [applyJobId, setApplyJobId] = useState<string | null>(null);
+  const [applyFile, setApplyFile] = useState<File | null>(null);
+  const [applyUploading, setApplyUploading] = useState(false);
+  const [applyError, setApplyError] = useState('');
+  const [applySuccess, setApplySuccess] = useState('');
+  const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set());
+
   const isRecruiter = user?.role === 'recruiterAdmin' || user?.role === 'hrManager';
   const isCandidate = user?.role === 'candidate';
+
+  // Load applied job IDs for current candidate once on mount
+  useEffect(() => {
+    if (!isCandidate) return;
+    listMyResumes()
+      .then((resumes) => {
+        const ids = new Set(resumes.map((r) => {
+          const jid = r.jobId;
+          return typeof jid === 'string' ? jid : (jid as any)?._id ?? '';
+        }).filter(Boolean));
+        setAppliedJobIds(ids);
+      })
+      .catch(() => { /* silent — non-critical */ });
+  }, [isCandidate]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -146,6 +169,39 @@ export default function JobsList() {
     setEligibilityJobId(null);
     setEligibilityError('');
     setEligibilityResult(null);
+  };
+
+  const openApplyModal = (jobId: string) => {
+    setApplyJobId(jobId);
+    setApplyFile(null);
+    setApplyError('');
+    setApplySuccess('');
+  };
+
+  const closeApplyModal = () => {
+    setApplyJobId(null);
+    setApplyFile(null);
+    setApplyError('');
+    setApplySuccess('');
+  };
+
+  const handleApply = async () => {
+    if (!applyJobId || !applyFile) {
+      setApplyError('Please select a resume file (PDF, DOC, or DOCX).');
+      return;
+    }
+    setApplyError('');
+    setApplyUploading(true);
+    try {
+      await uploadResume(applyJobId, applyFile);
+      setApplySuccess('Application submitted! A confirmation email has been sent.');
+      setAppliedJobIds((prev) => new Set(prev).add(applyJobId));
+      setApplyFile(null);
+    } catch (err: any) {
+      setApplyError(err?.response?.data?.message || 'Application failed. Please try again.');
+    } finally {
+      setApplyUploading(false);
+    }
   };
 
   const toggleCustomCriterion = (idx: number) => {
@@ -444,6 +500,19 @@ export default function JobsList() {
 
                 {/* Location and Job ID */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                  {job.companyName && (
+                    <p className="muted" style={{
+                      margin: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.875rem',
+                      fontWeight: '600',
+                      color: 'var(--primary)'
+                    }}>
+                      <span>🏢</span> {job.companyName}
+                    </p>
+                  )}
                   <p className="muted" style={{ 
                     margin: 0, 
                     display: 'flex', 
@@ -591,6 +660,52 @@ export default function JobsList() {
                     </button>
                   ) : null;
                 })()}
+                {isCandidate && job.status === 'active' && (
+                  appliedJobIds.has(job._id) ? (
+                    <span
+                      style={{
+                        padding: '0.6rem 1rem',
+                        borderRadius: 'var(--radius)',
+                        fontWeight: '600',
+                        fontSize: '0.875rem',
+                        background: 'rgba(5, 150, 105, 0.12)',
+                        color: '#059669',
+                        border: '1px solid rgba(5, 150, 105, 0.35)',
+                        display: 'inline-block',
+                        textAlign: 'center'
+                      }}
+                    >
+                      ✓ Applied
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => openApplyModal(job._id)}
+                      style={{
+                        padding: '0.6rem 1rem',
+                        borderRadius: 'var(--radius)',
+                        fontWeight: '600',
+                        fontSize: '0.875rem',
+                        background: 'linear-gradient(135deg, var(--primary) 0%, #0052a3 100%)',
+                        color: 'white',
+                        border: 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'inline-block',
+                        textAlign: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(10, 102, 194, 0.4)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      📄 Apply Now
+                    </button>
+                  )
+                )}
                 <Link 
                   to={`/jobs/${job._id}`}
                   style={{
@@ -887,6 +1002,74 @@ export default function JobsList() {
                 <button type="button" onClick={runEligibilityCheck} disabled={eligibilityChecking}>
                   {eligibilityChecking ? 'Checking...' : 'Evaluate'}
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Apply Modal */}
+      {applyJobId && (() => {
+        const job = jobs.find((j) => j._id === applyJobId);
+        if (!job) return null;
+        return (
+          <div
+            className="modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget && !applySuccess) closeApplyModal();
+            }}
+          >
+            <div className="modal" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-head">
+                <div>
+                  <h3>Apply — {job.title}</h3>
+                  <p className="muted">Upload your resume to submit your application.</p>
+                </div>
+                <button type="button" className="modal-close" onClick={closeApplyModal}>Close</button>
+              </div>
+
+              {applySuccess ? (
+                <div style={{ padding: '1.5rem 0', textAlign: 'center' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🎉</div>
+                  <p className="success-message" style={{ fontSize: '1rem', fontWeight: 600 }}>{applySuccess}</p>
+                  <p className="muted" style={{ marginTop: '0.5rem' }}>Check your email for confirmation details.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontWeight: 600, fontSize: '0.875rem' }}>
+                      Resume file (PDF, DOC, or DOCX)
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx"
+                        onChange={(e) => {
+                          setApplyFile(e.target.files?.[0] || null);
+                          setApplyError('');
+                        }}
+                        style={{ fontWeight: 'normal' }}
+                      />
+                    </label>
+                    {applyFile && (
+                      <p className="muted" style={{ marginTop: '0.4rem', fontSize: '0.8rem' }}>
+                        Selected: {applyFile.name} ({Math.round(applyFile.size / 1024)} KB)
+                      </p>
+                    )}
+                  </div>
+                  {applyError && <p className="error" style={{ marginTop: '0.75rem' }}>{applyError}</p>}
+                </>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" className="ghost" onClick={closeApplyModal}>
+                  {applySuccess ? 'Close' : 'Cancel'}
+                </button>
+                {!applySuccess && (
+                  <button type="button" onClick={handleApply} disabled={applyUploading || !applyFile}>
+                    {applyUploading ? 'Submitting...' : 'Submit Application'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
