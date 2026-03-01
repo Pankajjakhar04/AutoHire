@@ -107,22 +107,14 @@ export async function register(req, res) {
 
     setRefreshCookie(res, refreshToken);
     console.log(`[Registration] Success: User ${email} registered successfully`);
-    
-    // Send welcome email
-    try {
-      const emailResult = await sendWelcomeEmail({
-        to: email,
-        userName: name,
-        role: role,
-        userId: user._id
-      });
-      console.log('[Registration] Welcome email sent:', emailResult);
-    } catch (emailErr) {
-      console.error('[Registration] Failed to send welcome email:', emailErr.message);
-      // Don't fail registration if email fails
-    }
-    
-    return res.status(201).json({ user, accessToken });
+
+    // ✅ Respond immediately — don't block on email
+    res.status(201).json({ user, accessToken });
+
+    // Send welcome email in background (non-blocking)
+    sendWelcomeEmail({ to: email, userName: name, role, userId: user._id })
+      .then((result) => console.log('[Registration] Welcome email sent:', result))
+      .catch((emailErr) => console.error('[Registration] Failed to send welcome email:', emailErr.message));
   } catch (err) {
     console.error('[Registration] Error details:', {
       message: err.message,

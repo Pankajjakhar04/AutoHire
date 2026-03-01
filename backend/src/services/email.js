@@ -1,84 +1,54 @@
+// email.js — Gmail SMTP via Nodemailer
+//
+// ─── Setup (2 minutes) ───────────────────────────────────────────────────────
+//  1. Go to Google Account → Security → 2-Step Verification → enable it
+//  2. Go to Google Account → Security → App Passwords
+//  3. Generate a new App Password (select "Mail" + "Windows Computer")
+//  4. Copy the 16-character password (no spaces)
+//
+// ─── .env ────────────────────────────────────────────────────────────────────
+//  GMAIL_USER=youraddress@gmail.com
+//  GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx   ← 16-char app password
+//  FROM_NAME=Autohire-Pro Recruitment
+
 import nodemailer from 'nodemailer';
 
-// ─── Gmail SMTP Configuration ────────────────────────────────────────────────
-// Uses Gmail App Password (works on Render, Vercel, Railway, etc.)
-// Set these in your .env file (see README below)
-
-// Get environment variables at runtime, not module load time
-const getGmailConfig = () => ({
-  gmailUser: process.env.GMAIL_USER,
-  gmailPass: process.env.GMAIL_APP_PASS,
-  fromName: process.env.FROM_NAME || 'Autohire-Pro Recruitment'
-});
-
-let _transporter = null;
-
-function getTransporter() {
-  if (_transporter) return _transporter;
-
-  // Debug: Check environment variables at runtime
-  const { gmailUser, gmailPass, fromName } = getGmailConfig();
-  console.log('[Email] Debug - GMAIL_USER:', gmailUser || 'undefined');
-  console.log('[Email] Debug - GMAIL_APP_PASS:', gmailPass ? '***' : 'undefined');
-  console.log('[Email] Debug - GMAIL_USER:', process.env.GMAIL_USER || 'undefined');
-  console.log('[Email] Debug - GMAIL_APP_PASS:', process.env.GMAIL_APP_PASS ? '***' : 'undefined');
-
-  if (!gmailUser || !gmailPass) {
-    console.warn(
-      '[Email] Gmail not configured – set GMAIL_USER and GMAIL_APP_PASS in your .env'
-    );
-    return null;
-  }
-
-  _transporter = nodemailer.createTransport({
-    service: 'gmail',           // Nodemailer knows Gmail's SMTP settings automatically
-    auth: {
-      user: gmailUser,
-      pass: gmailPass,          // This is the App Password, NOT your Gmail login password
-    },
-    pool: true,                 // Reuse connections (important for Render cold starts)
-    maxConnections: 5,
-    maxMessages: 100,
-  });
-
-  // Verify connection on startup (optional but helpful for debugging)
-  _transporter.verify((err) => {
-    if (err) {
-      console.error('[Email] Gmail SMTP connection failed:', err.message);
-      _transporter = null;      // Reset so it retries next time
-    } else {
-      console.log('[Email] Gmail SMTP ready ✓');
-    }
-  });
-
-  return _transporter;
-}
-
 /* ─────────────────────────────────────────────
-   Internal helper – send a single email
+   Internal helper – send via Gmail SMTP
+   Reads env vars inside function so they are
+   always fresh after .env is loaded
 ───────────────────────────────────────────── */
 async function sendEmail({ to, subject, html }) {
-  const transporter = getTransporter();
+  const GMAIL_USER         = process.env.GMAIL_USER;
+  const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+  const FROM_NAME          = process.env.FROM_NAME || 'Autohire-Pro Recruitment';
 
-  if (!transporter) {
-    // Fallback: just log so your app doesn't crash if email isn't configured
-    console.log(`[Email][LOG – not sent] To: ${to} | Subject: ${subject}`);
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+    console.warn('[Email] GMAIL_USER or GMAIL_APP_PASSWORD not set — logging only');
+    console.log(`[Email][LOG] To: ${to} | Subject: ${subject}`);
     return { logged: true };
   }
 
   try {
-    const { gmailUser, gmailPass, fromName } = getGmailConfig();
-    const result = await transporter.sendMail({
-      from: `"${fromName}" <${gmailUser}>`,
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: GMAIL_USER,
+        pass: GMAIL_APP_PASSWORD,
+      },
+    });
+
+    const info = await transporter.sendMail({
+      from: `"${FROM_NAME}" <${GMAIL_USER}>`,
       to,
       subject,
       html,
     });
 
-    console.log(`[Email] Sent → ${to} | messageId: ${result.messageId}`);
-    return { sent: true, messageId: result.messageId };
+    console.log(`[Email] Sent → ${to} | messageId: ${info.messageId}`);
+    return { sent: true, messageId: info.messageId };
   } catch (err) {
-    console.error(`[Email] Failed → ${to} |`, err.message);
+    console.error(`[Email] Error → ${to} |`, err.message);
     return { error: err.message };
   }
 }
@@ -102,7 +72,37 @@ function emailWrapper(bodyHtml) {
 }
 
 /* ─────────────────────────────────────────────
-   1. Stage advancement email
+   1. Welcome email (called on registration)
+───────────────────────────────────────────── */
+export async function sendWelcomeEmail({ to, userName, role, userId }) {
+  const roleLabel = {
+    candidate:      'Candidate',
+    hrManager:      'HR Manager',
+    recruiterAdmin: 'Recruiter Admin',
+  }[role] ?? role;
+
+  const subject = `Welcome to Autohire-Pro, ${userName || 'there'}!`;
+  const html = emailWrapper(`
+    <p>Dear <strong>${userName || 'User'}</strong>,</p>
+    <p>Welcome to <strong>Autohire-Pro</strong>! Your account has been successfully created.</p>
+    <table style="width:100%;border-collapse:collapse;margin:12px 0;">
+      <tr>
+        <td style="padding:8px 12px;background:#F3F4F6;border-radius:6px;font-weight:600;width:40%;">Role</td>
+        <td style="padding:8px 12px;background:#F3F4F6;border-radius:6px;">${roleLabel}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;font-weight:600;">Email</td>
+        <td style="padding:8px 12px;">${to}</td>
+      </tr>
+    </table>
+    <p>You can now log in and explore the platform. If you have any questions, feel free to reach out.</p>
+  `);
+
+  return sendEmail({ to, subject, html });
+}
+
+/* ─────────────────────────────────────────────
+   2. Stage advancement email
 ───────────────────────────────────────────── */
 const STAGE_LABELS = {
   assessment: 'Assessment Shortlisting',
@@ -129,7 +129,7 @@ export async function sendStageEmail({ to, candidateName, jobTitle, stage }) {
 }
 
 /* ─────────────────────────────────────────────
-   2. Batch stage emails (non-blocking, parallel)
+   3. Batch stage emails
 ───────────────────────────────────────────── */
 export async function sendBatchStageEmails(candidates, jobTitle, stage) {
   const results = await Promise.allSettled(
@@ -145,7 +145,7 @@ export async function sendBatchStageEmails(candidates, jobTitle, stage) {
 }
 
 /* ─────────────────────────────────────────────
-   3. Application confirmation email
+   4. Application confirmation email
 ───────────────────────────────────────────── */
 export async function sendApplicationConfirmation({ to, candidateName, jobTitle, jobId }) {
   const subject = `Autohire-Pro – Application Received for ${jobTitle}`;
@@ -165,40 +165,7 @@ export async function sendApplicationConfirmation({ to, candidateName, jobTitle,
 }
 
 /* ─────────────────────────────────────────────
-   5. Welcome email for new registrations
-──────────────────────────────────────────── */
-export async function sendWelcomeEmail({ to, userName, role, userId }) {
-  const subject = `Autohire-Pro – Welcome to the platform!`;
-  const html = emailWrapper(`
-    <p>Dear <strong>${userName || 'New User'}</strong>,</p>
-    <p>Welcome to <strong>Autohire-Pro</strong>! We're excited to have you join our recruitment platform.</p>
-    <p style="font-size:1.1rem;font-weight:600;color:#1F2937;padding:8px 12px;
-              background:#F3F4F6;border-radius:6px;">
-      Account Type: ${role.charAt(0).toUpperCase() + role.slice(1)}
-    </p>
-    <p>Your account has been successfully created and you can now:
-    ${role === 'candidate' ? `
-    <ul style="margin:16px 0;padding-left:20px;">
-      <li>Browse and apply for job openings</li>
-      <li>Upload and manage your resume</li>
-      <li>Track your application status</li>
-      <li>Receive updates on your applications</li>
-    </ul>` : `
-    <ul style="margin:16px 0;padding-left:20px;">
-      <li>Post job openings and manage listings</li>
-      <li>Review and screen candidate applications</li>
-      <li>Conduct AI-powered resume screening</li>
-      <li>Manage the recruitment pipeline</li>
-    </ul>`}
-    <p>If you have any questions or need assistance, please don't hesitate to reach out to our support team.</p>
-    <p>Thank you for choosing Autohire-Pro for your recruitment needs!</p>
-  `);
-
-  return sendEmail({ to, subject, html });
-}
-
-/* ─────────────────────────────────────────────
-   4. Rejection email  (bonus – often needed)
+   5. Rejection email
 ───────────────────────────────────────────── */
 export async function sendRejectionEmail({ to, candidateName, jobTitle }) {
   const subject = `Autohire-Pro – Update on your application for ${jobTitle}`;

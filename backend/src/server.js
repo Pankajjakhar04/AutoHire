@@ -13,18 +13,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Load environment files based on NODE_ENV
-const isProductionEnv = process.env.NODE_ENV === 'production';
+const isProductionEnv = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
 const envFile = isProductionEnv ? '.env.production' : '.env';
-dotenv.config({ path: path.resolve(__dirname, `../${envFile}`) });
 
-console.log(`[Server] Loading environment from: ${envFile}`);
+// Force load production file if it exists
+const productionEnvPath = path.resolve(__dirname, '../.env.production');
+if (fs.existsSync(productionEnvPath)) {
+  dotenv.config({ path: productionEnvPath });
+  console.log('[Server] Loading environment from: .env.production (forced)');
+} else {
+  dotenv.config({ path: path.resolve(__dirname, `../${envFile}`) });
+  console.log(`[Server] Loading environment from: ${envFile}`);
+}
+
+console.log(`[Server] Production mode: ${isProductionEnv}`);
 
 // Debug: Check if .env is loaded
 console.log("[Server] Environment check:");
 console.log("[Server] ML_BASE_URL:", process.env.ML_BASE_URL || "undefined");
 console.log("[Server] ML_API_KEY:", process.env.ML_API_KEY ? "***" : "undefined");
 console.log("[Server] GMAIL_USER:", process.env.GMAIL_USER || "undefined");
-console.log("[Server] GMAIL_APP_PASS:", process.env.GMAIL_APP_PASS ? "***" : "undefined");
+console.log("[Server] GMAIL_APP_PASSWORD:", process.env.GMAIL_APP_PASSWORD ? "***" : "undefined");
 
 // Ensure required directories exist
 const uploadsDir = path.resolve(__dirname, '../uploads');
