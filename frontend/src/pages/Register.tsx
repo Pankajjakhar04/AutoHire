@@ -64,6 +64,13 @@ export default function Register() {
 
   return (
     <div className="auth-container">
+      <div className="auth-logo">
+        <div className="auth-logo-mark">A</div>
+        <div>
+          <div className="auth-logo-name">AutoHire Pro</div>
+          <div className="auth-logo-sub">AI Based Recruitment Platform</div>
+        </div>
+      </div>
       <div className="auth-shell register-shell">
       <h1>Create account</h1>
       <form onSubmit={handleSubmit} className="auth-form register-form">

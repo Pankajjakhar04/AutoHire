@@ -16,7 +16,8 @@ import Profile from './pages/Profile';
 
 function App() {
   return (
-    <div className="background-container">
+    <>
+      <div className="background-container"></div>
       <div className="background-overlay"></div>
       <div className="content-wrapper">
         <BrowserRouter>
@@ -42,7 +43,7 @@ function App() {
           </AuthProvider>
         </BrowserRouter>
       </div>
-    </div>
+    </>
   );
 }
 

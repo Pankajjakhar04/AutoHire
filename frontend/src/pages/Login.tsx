@@ -27,6 +27,13 @@ export default function Login() {
 
   return (
     <div className="auth-container">
+      <div className="auth-logo">
+        <div className="auth-logo-mark">A</div>
+        <div>
+          <div className="auth-logo-name">AutoHire Pro</div>
+          <div className="auth-logo-sub">AI Based Recruitment Platform</div>
+        </div>
+      </div>
       <div className="auth-shell">
         <h1>Sign in</h1>
         <form onSubmit={handleSubmit} className="auth-form">

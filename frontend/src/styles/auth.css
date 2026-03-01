@@ -8,6 +8,48 @@
   z-index: 1;
 }
 
+.auth-logo {
+  position: fixed;
+  top: 1.5rem;
+  left: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  z-index: 10;
+}
+
+.auth-logo-mark {
+  width: 2.4rem;
+  height: 2.4rem;
+  background: linear-gradient(135deg, #1e3a5f, #2d5a9e);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 800;
+  font-family: 'Space Grotesk', sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px 8px 12px 12px;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%);
+  flex-shrink: 0;
+}
+
+.auth-logo-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1e3a5f;
+  font-family: 'Space Grotesk', 'Work Sans', sans-serif;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.auth-logo-sub {
+  font-size: 0.7rem;
+  color: #6b7280;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
 .auth-shell {
   background: #ffffff;
   backdrop-filter: blur(20px);
